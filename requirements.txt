@@ -1,0 +1,11 @@
+flask==3.0.0
+flask-login==0.6.3
+flask-mysqldb==1.0.1
+bcrypt==4.0.1
+openpyxl==3.1.2
+python-dotenv==1.0.0
+python-docx==1.1.0
+docx2pdf==0.1.8
+APScheduler==3.10.4
+pymysql==1.1.0
+chardet==5.2.0

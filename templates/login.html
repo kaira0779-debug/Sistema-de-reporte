@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Iniciar Sesión{% endblock %}
+
+{% block content %}
+<div class="auth-container">
+    <div class="auth-card">
+        <div class="auth-icon">
+            <i class="fas fa-bolt"></i>
+        </div>
+        <h3 class="auth-title">Sistema de Tickets</h3>
+        <p class="auth-subtitle">Inicia sesión con tu cuenta</p>
+
+        <form method="POST" class="auth-form">
+            <div class="input-group-custom">
+                <i class="fas fa-user"></i>
+                <input type="text" name="username" placeholder="Usuario" required>
+            </div>
+            <div class="input-group-custom">
+                <i class="fas fa-lock"></i>
+                <input type="password" name="password" placeholder="Contraseña" required>
+            </div>
+            <button type="submit" class="btn-auth">Ingresar</button>
+        </form>
+    </div>
+</div>
+{% endblock %}

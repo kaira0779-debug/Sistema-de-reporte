@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Vista previa de la planilla{% endblock %}
+{% block heading %}Vista previa de la planilla{% endblock %}
+{% block breadcrumb %}Verifique y descargue la planilla generada{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="fas fa-file-pdf me-2" style="color: var(--primary);"></i> Planilla generada</span>
+        <div>
+            <a href="{{ pdf_url }}" class="btn btn-amarillo" download>
+                <i class="fas fa-download"></i> Descargar PDF
+            </a>
+            <a href="{{ url_for('planilla_soporte') }}" class="btn btn-secondary">
+                <i class="fas fa-arrow-left"></i> Volver
+            </a>
+        </div>
+    </div>
+    <div class="card-body p-0" style="height: 85vh; background: #f8f9fc;">
+        <embed src="{{ pdf_url }}" type="application/pdf" style="width:100%; height:100%; border:none;" 
+               onerror="this.style.display='none'; document.getElementById('errorPdf').style.display='block';">
+        <div id="errorPdf" style="display:none; padding: 2rem; text-align: center;">
+            <i class="fas fa-file-pdf fa-4x text-danger mb-3"></i>
+            <h5>No se pudo cargar la vista previa del PDF</h5>
+            <p class="text-muted">Puede descargar el archivo haciendo clic en el botón "Descargar PDF".</p>
+        </div>
+    </div>
+</div>
+{% endblock %}

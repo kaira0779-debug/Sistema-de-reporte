@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}Duplicados de Tickets{% endblock %}
+{% block heading %}Análisis de Duplicados{% endblock %}
+{% block breadcrumb %}Tickets duplicados exactos (mismos datos en todas las columnas){% endblock %}
+
+{% block content %}
+<div class="alert alert-info">
+    <i class="fas fa-info-circle"></i> Se consideran duplicados <strong>exactos</strong> aquellos tickets que son idénticos en todos sus campos: fecha, número de ticket, nodo, cliente, motivo, visita técnica, tipo de falla, departamento, estado, responsable y observaciones.
+</div>
+
+<div class="d-flex gap-2 mb-3">
+    <form method="POST" action="{{ url_for('eliminar_duplicados_auto') }}" onsubmit="return confirm('¿Eliminar automáticamente todos los duplicados exactos? Se conservará el ticket más reciente de cada grupo.');">
+        <button type="submit" class="btn btn-danger">
+            <i class="fas fa-broom"></i> Eliminar todos los duplicados exactos automáticamente
+        </button>
+    </form>
+    <a href="{{ url_for('admin_duplicados') }}" class="btn btn-secondary">
+        <i class="fas fa-sync-alt"></i> Refrescar lista
+    </a>
+</div>
+
+{% if duplicados %}
+    <div class="card">
+        <div class="card-header">
+            <i class="fas fa-copy me-2" style="color: var(--primary);"></i> Grupos de duplicados exactos (vista previa)
+        </div>
+        <div class="card-body">
+            {% for grupo in duplicados %}
+            <div class="card mb-3">
+                <div class="card-header">
+                    <strong>{{ grupo.fecha.strftime('%d/%m/%Y') if grupo.fecha else 'Sin fecha' }}</strong> – {{ grupo.cliente }}
+                    <br><small>Motivo: {{ grupo.motivo_ticket }} | Falla: {{ grupo.tipo_falla }}</small>
+                    <span class="badge bg-secondary">{{ grupo.tickets|length }} registros</span>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>N° Ticket</th>
+                                    <th>Nodo</th>
+                                    <th>Visita</th>
+                                    <th>Departamento</th>
+                                    <th>Estado</th>
+                                    <th>Responsable</th>
+                                    <th>Observaciones</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for t in grupo.tickets %}
+                                <tr class="{% if t.id == grupo.conservar %}table-success{% endif %}">
+                                    <td>{{ t.id }}</td>
+                                    <td>{{ t.num_ticket }}</td>
+                                    <td>{{ t.nodo }}</td>
+                                    <td>{{ t.visita_tecnica }}</td>
+                                    <td>{{ t.departamento }}</td>
+                                    <td>{{ t.status }}</td>
+                                    <td>{{ t.responsable }}</td>
+                                    <td>{{ t.observaciones }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+{% else %}
+    <div class="card">
+        <div class="card-body">
+            <p class="text-success mb-0"><i class="fas fa-check-circle"></i> No se encontraron tickets duplicados.</p>
+        </div>
+    </div>
+{% endif %}
+{% endblock %}

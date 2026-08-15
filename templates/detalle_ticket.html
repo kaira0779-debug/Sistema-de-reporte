@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Detalle de Ticket{% endblock %}
+{% block heading %}Ticket {{ ticket.num_ticket }}{% endblock %}
+{% block breadcrumb %}Información del ticket{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-8">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="fas fa-ticket-alt me-2" style="color: var(--primary);"></i> Detalle del Ticket</span>
+                <div>
+                    <a href="{{ url_for('editar_ticket', ticket_id=ticket.id) }}" class="btn btn-sm btn-amarillo">
+                        <i class="fas fa-edit"></i> Editar
+                    </a>
+                    <form method="POST" action="{{ url_for('eliminar_ticket', ticket_id=ticket.id) }}" style="display:inline;" onsubmit="return confirm('¿Eliminar este ticket?')">
+                        <button type="submit" class="btn btn-sm btn-outline-danger"><i class="fas fa-trash-alt"></i> Eliminar</button>
+                    </form>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <p><strong>N° Ticket:</strong> {{ ticket.num_ticket }}</p>
+                        <p><strong>Fecha:</strong> {{ ticket.fecha.strftime('%d/%m/%Y') if ticket.fecha else '' }}</p>
+                        <p><strong>Cliente:</strong> {{ ticket.cliente }}</p>
+                        <p><strong>Nodo:</strong> {{ ticket.nodo or '—' }}</p>
+                    </div>
+                    <div class="col-md-6">
+                        <p><strong>Motivo:</strong> {{ ticket.motivo_ticket or '—' }}</p>
+                        <p><strong>Visita Técnica:</strong> {{ ticket.visita_tecnica or '—' }}</p>
+                        <p><strong>Tipo de Falla:</strong> {{ ticket.tipo_falla or '—' }}</p>
+                        <p><strong>Status:</strong> {{ ticket.status or '—' }}</p>
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <p><strong>Departamento:</strong> {{ ticket.departamento or '—' }}</p>
+                    <p><strong>Responsable:</strong> {{ ticket.responsable or '—' }}</p>
+                    <p><strong>Observaciones:</strong></p>
+                    <div class="p-3 bg-light rounded">{{ ticket.observaciones or 'Sin observaciones' }}</div>
+                </div>
+                <a href="{{ url_for('tickets') }}" class="btn btn-secondary"><i class="fas fa-arrow-left"></i> Volver a lista</a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

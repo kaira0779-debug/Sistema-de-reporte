@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}Respaldos de Base de Datos{% endblock %}
+{% block heading %}Respaldos{% endblock %}
+
+{% block content %}
+<div class="card mb-4">
+    <div class="card-header">
+        <i class="fas fa-database me-2" style="color: var(--primary);"></i> Archivos de Respaldo
+    </div>
+    <div class="card-body">
+        {% if backups %}
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th>Archivo</th>
+                        <th>Tamaño</th>
+                        <th>Fecha</th>
+                        <th>Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for b in backups %}
+                    <tr>
+                        <td>{{ b.nombre }}</td>
+                        <td>{{ b.tamaño_legible }}</td>
+                        <td>{{ b.fecha }}</td>
+                        <td>
+                            <a href="{{ url_for('descargar_respaldo', filename=b.nombre) }}" class="btn btn-sm btn-amarillo"><i class="fas fa-download"></i> Descargar</a>
+                            <form method="POST" action="{{ url_for('eliminar_respaldo', filename=b.nombre) }}" style="display:inline;" onsubmit="return confirm('¿Eliminar este respaldo?')">
+                                <button class="btn btn-sm btn-outline-danger"><i class="fas fa-trash-alt"></i></button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="text-muted">No hay respaldos disponibles.</p>
+        {% endif %}
+    </div>
+</div>
+
+{% if logs %}
+<div class="card">
+    <div class="card-header">
+        <i class="fas fa-history me-2" style="color: var(--primary);"></i> Historial de Respaldos
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-sm">
+                <thead>
+                    <tr>
+                        <th>Archivo</th>
+                        <th>Tamaño</th>
+                        <th>Fecha</th>
+                        <th>Tipo</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for log in logs %}
+                    <tr>
+                        <td>{{ log.filename }}</td>
+                        <td>{{ (log.size / 1024) | round(1) }} KB</td>
+                        <td>{{ log.fecha.strftime('%d/%m/%Y %H:%M:%S') }}</td>
+                        <td><span class="badge bg-secondary">{{ log.tipo }}</span></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

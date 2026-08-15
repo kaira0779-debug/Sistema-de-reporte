@@ -1,0 +1,441 @@
+{% extends "base.html" %}
+{% block title %}Gráficas{% endblock %}
+{% block heading %}Panel de Gráficas{% endblock %}
+{% block breadcrumb %}Estadísticas detalladas de tickets y clientes{% endblock %}
+
+{% block content %}
+<!-- Tarjetas de resumen -->
+<div class="row g-4 mb-4">
+    <div class="col-md-3">
+        <div class="card summary-card">
+            <div class="card-body">
+                <div class="summary-icon blue"><i class="fas fa-ticket-alt"></i></div>
+                <div class="summary-info">
+                    <h6>Total Tickets</h6>
+                    <h3 id="totalTickets">-</h3>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card summary-card">
+            <div class="card-body">
+                <div class="summary-icon green"><i class="fas fa-calendar-week"></i></div>
+                <div class="summary-info">
+                    <h6>Promedio semanal</h6>
+                    <h3 id="promedioSemanal">-</h3>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card summary-card">
+            <div class="card-body">
+                <div class="summary-icon purple"><i class="fas fa-calendar-alt"></i></div>
+                <div class="summary-info">
+                    <h6>Promedio mensual</h6>
+                    <h3 id="promedioMensual">-</h3>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card summary-card">
+            <div class="card-body">
+                <div class="summary-icon orange"><i class="fas fa-users"></i></div>
+                <div class="summary-info">
+                    <h6>Clientes por nodo</h6>
+                    <h3 id="totalNodos">-</h3>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Pestañas -->
+<ul class="nav nav-tabs mb-4" id="graficasTabs" role="tablist">
+    <li class="nav-item" role="presentation">
+        <button class="nav-link active" id="tickets-tab" data-bs-toggle="tab" data-bs-target="#tickets" type="button" role="tab">
+            <i class="fas fa-ticket-alt me-2"></i> Tickets
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="clientes-tab" data-bs-toggle="tab" data-bs-target="#clientes" type="button" role="tab">
+            <i class="fas fa-users me-2"></i> Clientes
+        </button>
+    </li>
+</ul>
+
+<div class="tab-content" id="graficasTabsContent">
+    <div class="tab-pane fade show active" id="tickets" role="tabpanel">
+        <div class="row g-4">
+            <!-- Gráfica de días -->
+            <div class="col-lg-12">
+                <div class="card">
+                    <div class="card-header card-header-blue">
+                        <i class="fas fa-calendar-day me-2"></i>
+                        Tickets por Día (últimos 30 días)
+                    </div>
+                    <div class="card-body" style="height: 300px; position: relative;">
+                        <canvas id="barrasDia"></canvas>
+                        <div id="sinDatosDia" style="display:none; text-align:center; padding: 2rem;">
+                            <i class="fas fa-info-circle fa-3x text-muted mb-3"></i>
+                            <p class="text-muted">No hay tickets en los últimos 30 días.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-lg-6">
+                <div class="card">
+                    <div class="card-header card-header-yellow">
+                        <i class="fas fa-calendar-week me-2"></i>
+                        Tickets por Semana (últimas 8)
+                    </div>
+                    <div class="card-body" style="height: 280px; position: relative;">
+                        <canvas id="barrasSemana"></canvas>
+                    </div>
+                </div>
+            </div>
+            <div class="col-lg-6">
+                <div class="card">
+                    <div class="card-header card-header-green">
+                        <i class="fas fa-calendar-alt me-2"></i>
+                        Tickets por Mes (últimos 12)
+                    </div>
+                    <div class="card-body" style="height: 280px; position: relative;">
+                        <canvas id="barrasMes"></canvas>
+                    </div>
+                </div>
+            </div>
+            <div class="col-lg-8 mx-auto">
+                <div class="card">
+                    <div class="card-header card-header-purple">
+                        <i class="fas fa-exclamation-triangle me-2"></i>
+                        Top 10 Tipos de Falla
+                    </div>
+                    <div class="card-body" style="height: 380px; position: relative;">
+                        <canvas id="donaFallas"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="tab-pane fade" id="clientes" role="tabpanel">
+        <div class="row justify-content-center">
+            <div class="col-lg-8">
+                <div class="card">
+                    <div class="card-header card-header-yellow">
+                        <i class="fas fa-map-marker-alt me-2"></i>
+                        Distribución de Clientes por Nodo
+                    </div>
+                    <div class="card-body" style="height: 440px; position: relative;">
+                        <canvas id="donaClientes"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
+<script>
+Chart.register(ChartDataLabels);
+
+let chartDia = null;
+let chartSemana = null;
+let chartMes = null;
+let chartFallas = null;
+let chartClientes = null;
+
+function actualizarResumen(data) {
+    if (data.totales_semana && data.totales_semana.length > 0) {
+        const total = data.totales_semana.reduce((a, b) => a + b, 0);
+        document.getElementById('totalTickets').textContent = total;
+        const promedioSem = Math.round(total / data.totales_semana.length);
+        document.getElementById('promedioSemanal').textContent = promedioSem;
+    }
+    if (data.totales_mes && data.totales_mes.length > 0) {
+        const totalMes = data.totales_mes.reduce((a, b) => a + b, 0);
+        const promedioMes = Math.round(totalMes / data.totales_mes.length);
+        document.getElementById('promedioMensual').textContent = promedioMes;
+    }
+}
+
+async function cargarTickets() {
+    try {
+        const resp = await fetch('/api/graficas/datos?filtro=tickets');
+        const data = await resp.json();
+
+        actualizarResumen(data);
+
+        if (chartDia) chartDia.destroy();
+        if (chartSemana) chartSemana.destroy();
+        if (chartMes) chartMes.destroy();
+        if (chartFallas) chartFallas.destroy();
+
+        // --- Gráfico de días (con manejo de vacío) ---
+        const ctxDia = document.getElementById('barrasDia').getContext('2d');
+        const contenedorDia = document.getElementById('barrasDia').parentElement;
+        const sinDatosDia = document.getElementById('sinDatosDia');
+
+        if (data.dias && data.dias.length > 0) {
+            sinDatosDia.style.display = 'none';
+            document.getElementById('barrasDia').style.display = 'block';
+            const coloresDia = data.dias.map((_, i) => `hsl(${(i * 12) % 360}, 75%, 60%)`);
+            chartDia = new Chart(ctxDia, {
+                type: 'bar',
+                data: {
+                    labels: data.dias.map(d => {
+                        const partes = d.split('-');
+                        return `${partes[2]}/${partes[1]}`;
+                    }),
+                    datasets: [{
+                        label: 'Tickets',
+                        data: data.totales_dia,
+                        backgroundColor: coloresDia,
+                        borderColor: 'rgba(0,0,0,0.1)',
+                        borderWidth: 1,
+                        borderRadius: 4,
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return `Tickets: ${context.parsed.y}`;
+                                }
+                            }
+                        },
+                        datalabels: {
+                            anchor: 'end',
+                            align: 'end',
+                            color: '#2b2d42',
+                            font: { weight: 'bold', size: 9 },
+                            formatter: (value) => value > 0 ? value : ''
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: { color: '#6c757d', stepSize: 1 },
+                            grid: { color: 'rgba(0,0,0,0.05)' }
+                        },
+                        x: {
+                            ticks: { color: '#6c757d', maxRotation: 45, autoSkip: true, maxTicksLimit: 20 },
+                            grid: { display: false }
+                        }
+                    }
+                },
+                plugins: [ChartDataLabels]
+            });
+        } else {
+            sinDatosDia.style.display = 'block';
+            document.getElementById('barrasDia').style.display = 'none';
+        }
+
+        // --- Gráfico de semana ---
+        const ctxSemana = document.getElementById('barrasSemana').getContext('2d');
+        const coloresSemana = data.semanas.map((_, i) => `hsl(${(i * 45) % 360}, 75%, 55%)`);
+        chartSemana = new Chart(ctxSemana, {
+            type: 'bar',
+            data: {
+                labels: data.semanas,
+                datasets: [{
+                    label: 'Tickets',
+                    data: data.totales_semana,
+                    backgroundColor: coloresSemana,
+                    borderColor: 'rgba(0,0,0,0.1)',
+                    borderWidth: 1,
+                    borderRadius: 4,
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: { callbacks: { label: function(c) { return `Tickets: ${c.parsed.y}`; } } },
+                    datalabels: {
+                        anchor: 'end',
+                        align: 'end',
+                        color: '#2b2d42',
+                        font: { weight: 'bold', size: 10 },
+                        formatter: (value) => value > 0 ? value : ''
+                    }
+                },
+                scales: {
+                    y: { beginAtZero: true, ticks: { color: '#6c757d', stepSize: 1 }, grid: { color: 'rgba(0,0,0,0.05)' } },
+                    x: { ticks: { color: '#6c757d' }, grid: { display: false } }
+                }
+            },
+            plugins: [ChartDataLabels]
+        });
+
+        // --- Gráfico de mes ---
+        const ctxMes = document.getElementById('barrasMes').getContext('2d');
+        const coloresMes = data.meses.map((_, i) => `hsl(${(i * 30) % 360}, 75%, 50%)`);
+        chartMes = new Chart(ctxMes, {
+            type: 'bar',
+            data: {
+                labels: data.meses,
+                datasets: [{
+                    label: 'Tickets',
+                    data: data.totales_mes,
+                    backgroundColor: coloresMes,
+                    borderColor: 'rgba(0,0,0,0.1)',
+                    borderWidth: 1,
+                    borderRadius: 4,
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: { callbacks: { label: function(c) { return `Tickets: ${c.parsed.y}`; } } },
+                    datalabels: {
+                        anchor: 'end',
+                        align: 'end',
+                        color: '#2b2d42',
+                        font: { weight: 'bold', size: 10 },
+                        formatter: (value) => value > 0 ? value : ''
+                    }
+                },
+                scales: {
+                    y: { beginAtZero: true, ticks: { color: '#6c757d', stepSize: 1 }, grid: { color: 'rgba(0,0,0,0.05)' } },
+                    x: { ticks: { color: '#6c757d' }, grid: { display: false } }
+                }
+            },
+            plugins: [ChartDataLabels]
+        });
+
+        // --- Gráfico de fallas ---
+        const ctxFallas = document.getElementById('donaFallas').getContext('2d');
+        const coloresFallas = [
+            '#e74c3c', '#f39c12', '#2ecc71', '#3498db', '#9b59b6',
+            '#1abc9c', '#e67e22', '#2ecc71', '#e74c3c', '#34495e'
+        ];
+        chartFallas = new Chart(ctxFallas, {
+            type: 'doughnut',
+            data: {
+                labels: data.fallas_labels,
+                datasets: [{
+                    data: data.fallas_data,
+                    backgroundColor: coloresFallas.slice(0, data.fallas_labels.length),
+                    borderColor: '#ffffff',
+                    borderWidth: 2,
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'bottom',
+                        labels: { color: '#2b2d42', padding: 12, usePointStyle: true, font: { size: 12 } }
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                const pct = total > 0 ? Math.round((context.parsed / total) * 100) : 0;
+                                return `${context.label}: ${context.parsed} (${pct}%)`;
+                            }
+                        }
+                    },
+                    datalabels: {
+                        color: '#fff',
+                        font: { weight: 'bold', size: 13 },
+                        formatter: (value, ctx) => {
+                            const total = ctx.dataset.data.reduce((a, b) => a + b, 0);
+                            const pct = total > 0 ? Math.round((value / total) * 100) : 0;
+                            return pct > 5 ? pct + '%' : '';
+                        }
+                    }
+                },
+                cutout: '65%'
+            },
+            plugins: [ChartDataLabels]
+        });
+
+    } catch (error) {
+        console.error('Error al cargar gráficas de tickets:', error);
+    }
+}
+
+async function cargarClientes() {
+    try {
+        const resp = await fetch('/api/graficas/datos?filtro=clientes_zona');
+        const data = await resp.json();
+        if (chartClientes) chartClientes.destroy();
+
+        if (data.dona_data) {
+            const total = data.dona_data.reduce((a, b) => a + b, 0);
+            document.getElementById('totalNodos').textContent = total;
+        }
+
+        const ctxClientes = document.getElementById('donaClientes').getContext('2d');
+        chartClientes = new Chart(ctxClientes, {
+            type: 'doughnut',
+            data: {
+                labels: data.dona_labels,
+                datasets: [{
+                    data: data.dona_data,
+                    backgroundColor: data.colores_dona,
+                    borderColor: '#ffffff',
+                    borderWidth: 2,
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'bottom',
+                        labels: { color: '#2b2d42', padding: 12, usePointStyle: true, font: { size: 12 } }
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                const pct = total > 0 ? Math.round((context.parsed / total) * 100) : 0;
+                                return `${context.label}: ${context.parsed} (${pct}%)`;
+                            }
+                        }
+                    },
+                    datalabels: {
+                        color: '#fff',
+                        font: { weight: 'bold', size: 13 },
+                        formatter: (value, ctx) => {
+                            const total = ctx.dataset.data.reduce((a, b) => a + b, 0);
+                            const pct = total > 0 ? Math.round((value / total) * 100) : 0;
+                            return pct > 5 ? pct + '%' : '';
+                        }
+                    }
+                },
+                cutout: '65%'
+            },
+            plugins: [ChartDataLabels]
+        });
+    } catch (error) {
+        console.error('Error al cargar gráfica de clientes:', error);
+    }
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    cargarTickets();
+});
+
+document.getElementById('clientes-tab').addEventListener('shown.bs.tab', function () {
+    setTimeout(() => cargarClientes(), 150);
+});
+</script>
+{% endblock %}

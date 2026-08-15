@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Importar Excel{% endblock %}
+{% block heading %}Carga Masiva desde Excel{% endblock %}
+{% block content %}
+<div class="card">
+    <div class="card-body">
+        <h5 class="card-title mb-4">Subir archivo .xlsx</h5>
+        <p class="text-muted">El archivo debe contener las columnas en este orden exacto:</p>
+        <ul>
+            <li><strong>Fecha de atención</strong></li>
+            <li><strong>Nº de Ticket</strong></li>
+            <li><strong>Nodo</strong></li>
+            <li><strong>Hora de Inicio</strong></li>
+            <li><strong>Nombre del cliente</strong></li>
+            <li><strong>Motivo de ticket</strong></li>
+            <li><strong>Visita Técnica</strong></li>
+            <li><strong>Tipo de Falla</strong></li>
+            <li><strong>Status</strong> (Activo, Sin Servicio, Pendiente)</li>
+            <li><strong>Observaciones</strong></li>
+        </ul>
+        <form method="POST" enctype="multipart/form-data">
+            <div class="mb-3">
+                <label for="archivo" class="form-label">Selecciona el archivo Excel (.xlsx)</label>
+                <input class="form-control" type="file" name="archivo" id="archivo" accept=".xlsx" required>
+            </div>
+            <button type="submit" class="btn btn-amarillo"><i class="fas fa-upload"></i> Importar Datos</button>
+        </form>
+    </div>
+</div>
+{% endblock %}

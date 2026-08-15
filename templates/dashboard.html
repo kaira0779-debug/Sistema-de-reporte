@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}Inicio{% endblock %}
+{% block heading %}Panel Principal{% endblock %}
+{% block breadcrumb %}Bienvenido, {{ current_user.nombre_completo }}{% endblock %}
+
+{% block content %}
+<div class="row g-4">
+    {% if current_user.rol == 'admin' %}
+        <div class="col-lg-4 col-md-6">
+            <div class="card dashboard-card text-center p-4">
+                <div class="card-icon blue"><i class="fas fa-users"></i></div>
+                <h5 class="card-title">Clientes</h5>
+                <p class="card-text">Gestionar clientes registrados</p>
+                <a href="{{ url_for('clientes') }}" class="btn btn-primary w-100">Ir a Clientes</a>
+            </div>
+        </div>
+        <div class="col-lg-4 col-md-6">
+            <div class="card dashboard-card text-center p-4">
+                <div class="card-icon purple"><i class="fas fa-chart-pie"></i></div>
+                <h5 class="card-title">Gráficas</h5>
+                <p class="card-text">Estadísticas de tickets y clientes</p>
+                <a href="{{ url_for('graficas') }}" class="btn btn-purple w-100">Ver Gráficas</a>
+            </div>
+        </div>
+        <div class="col-lg-4 col-md-6">
+            <div class="card dashboard-card text-center p-4">
+                <div class="card-icon yellow"><i class="fas fa-ticket-alt"></i></div>
+                <h5 class="card-title">Tickets</h5>
+                <p class="card-text">Listado y gestión de tickets</p>
+                <a href="{{ url_for('tickets') }}" class="btn btn-amarillo w-100">Ver Tickets</a>
+            </div>
+        </div>
+        <div class="col-lg-4 col-md-6">
+            <div class="card dashboard-card text-center p-4">
+                <div class="card-icon green"><i class="fas fa-file-word"></i></div>
+                <h5 class="card-title">Planilla de Soporte</h5>
+                <p class="card-text">Generar órdenes de servicio</p>
+                <a href="{{ url_for('planilla_soporte') }}" class="btn btn-success w-100">Abrir</a>
+            </div>
+        </div>
+        <div class="col-lg-4 col-md-6">
+            <div class="card dashboard-card text-center p-4">
+                <div class="card-icon orange"><i class="fas fa-user-cog"></i></div>
+                <h5 class="card-title">Técnicos</h5>
+                <p class="card-text">Registrar y gestionar técnicos</p>
+                <a href="{{ url_for('admin_tecnicos') }}" class="btn btn-secondary w-100">Gestionar</a>
+            </div>
+        </div>
+        <div class="col-lg-4 col-md-6">
+            <div class="card dashboard-card text-center p-4">
+                <div class="card-icon red"><i class="fas fa-shield-alt"></i></div>
+                <h5 class="card-title">Panel Admin</h5>
+                <p class="card-text">Supervisión y mantenimiento</p>
+                <a href="{{ url_for('admin_panel') }}" class="btn btn-danger w-100">Abrir</a>
+            </div>
+        </div>
+    {% else %}
+        <div class="col-lg-8 mx-auto">
+            <div class="card dashboard-card text-center p-4">
+                <div class="card-icon green"><i class="fas fa-file-word"></i></div>
+                <h5 class="card-title">Planilla de Soporte</h5>
+                <p class="card-text">Generar órdenes de servicio técnico</p>
+                <a href="{{ url_for('planilla_soporte') }}" class="btn btn-success w-100">Abrir Planilla</a>
+            </div>
+        </div>
+    {% endif %}
+</div>
+{% endblock %}

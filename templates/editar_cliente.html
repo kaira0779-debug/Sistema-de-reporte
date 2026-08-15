@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}Editar Cliente{% endblock %}
+{% block heading %}Editar Cliente{% endblock %}
+{% block breadcrumb %}Modificar datos del cliente{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-8">
+        <div class="card">
+            <div class="card-header">
+                <i class="fas fa-user-edit me-2" style="color: var(--primary);"></i> Editar Cliente
+            </div>
+            <div class="card-body">
+                <form method="POST">
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="n_contrato" class="form-label">N° Contrato</label>
+                            <input type="text" class="form-control" id="n_contrato" name="n_contrato" value="{{ cliente.n_contrato or '' }}" placeholder="Ej: 1234">
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label for="n_documento" class="form-label">N° Documento (Cédula/RIF)</label>
+                            <input type="text" class="form-control" id="n_documento" name="n_documento" value="{{ cliente.n_documento or '' }}" placeholder="Ej: 12345678">
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="nombre_apellido" class="form-label">Nombre y Apellido <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="nombre_apellido" name="nombre_apellido" value="{{ cliente.nombre_apellido or '' }}" placeholder="Ej: Juan Pérez" required>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label for="telefono" class="form-label">Teléfono</label>
+                            <input type="text" class="form-control" id="telefono" name="telefono" value="{{ cliente.telefono or '' }}" placeholder="Ej: 0412-1234567">
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="direccion_servicio" class="form-label">Dirección del servicio</label>
+                        <input type="text" class="form-control" id="direccion_servicio" name="direccion_servicio" value="{{ cliente.direccion_servicio or '' }}" placeholder="Ej: Calle 2, Edif. Los Pinos, Piso 3, Apto 3A">
+                    </div>
+                    <div class="row">
+                        <div class="col-md-4 mb-3">
+                            <label for="nodo" class="form-label">Nodo</label>
+                            <input type="text" class="form-control" id="nodo" name="nodo" value="{{ cliente.nodo or '' }}" list="listaNodos" placeholder="Escribe o selecciona...">
+                            <datalist id="listaNodos">
+                                {% for nodo in nodos %}
+                                <option value="{{ nodo }}">
+                                {% endfor %}
+                            </datalist>
+                        </div>
+                        <div class="col-md-3 mb-3">
+                            <label for="mbps_contratados" class="form-label">Mbps contratados</label>
+                            <input type="number" class="form-control" id="mbps_contratados" name="mbps_contratados" value="{{ cliente.mbps_contratados or '' }}" placeholder="Ej: 6">
+                        </div>
+                        <div class="col-md-5 mb-3">
+                            <label for="estatus_usuario" class="form-label">Estatus</label>
+                            <select class="form-select" id="estatus_usuario" name="estatus_usuario">
+                                <option value="ACTIVO" {% if cliente.estatus_usuario == 'ACTIVO' %}selected{% endif %}>ACTIVO</option>
+                                <option value="INACTIVO" {% if cliente.estatus_usuario == 'INACTIVO' %}selected{% endif %}>INACTIVO</option>
+                                <option value="SUSPENDIDO" {% if cliente.estatus_usuario == 'SUSPENDIDO' %}selected{% endif %}>SUSPENDIDO</option>
+                                <option value="CORTESÍA" {% if cliente.estatus_usuario == 'CORTESÍA' %}selected{% endif %}>CORTESÍA</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="asignador" class="form-label">Asignador (quien asignó la instalación)</label>
+                            <input type="text" class="form-control" id="asignador" name="asignador" value="{{ cliente.asignador or '' }}" placeholder="Ej: Técnico o Vendedor">
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-amarillo"><i class="fas fa-save"></i> Guardar Cambios</button>
+                    <a href="{{ url_for('detalle_cliente', cliente_id=cliente.id) }}" class="btn btn-secondary">Cancelar</a>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

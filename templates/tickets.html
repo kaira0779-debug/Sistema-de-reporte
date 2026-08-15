@@ -1,0 +1,207 @@
+{% extends "base.html" %}
+{% block title %}Tickets{% endblock %}
+{% block heading %}Tickets{% endblock %}
+{% block breadcrumb %}Gestión de tickets de soporte{% endblock %}
+
+{% block content %}
+<!-- Formulario para agregar ticket -->
+<div class="card mb-4">
+    <div class="card-header card-header-yellow">
+        <i class="fas fa-plus-circle me-2"></i> Agregar Ticket
+    </div>
+    <div class="card-body">
+        <form method="POST" action="{{ url_for('agregar_ticket') }}">
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label class="form-label">Buscar Cliente *</label>
+                    <input type="text" id="buscarCliente" class="form-control" placeholder="Escriba nombre, cédula o contrato">
+                    <input type="hidden" name="cliente_id" id="cliente_id">
+                    <div id="mensajeCliente" class="text-danger small mt-1" style="display:none;"></div>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Nodo</label>
+                    <select name="nodo" class="form-select">
+                        <option value="">-- Seleccione --</option>
+                        {% for n in nodos %}<option value="{{ n }}">{{ n }}</option>{% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Motivo de Ticket</label>
+                    <input name="motivo_ticket" class="form-control" list="listaMotivos" placeholder="Escriba o seleccione...">
+                    <datalist id="listaMotivos">
+                        {% for m in motivos %}<option value="{{ m }}">{% endfor %}
+                    </datalist>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Visita Técnica</label>
+                    <select name="visita_tecnica" class="form-select">
+                        <option value="">-- Seleccione --</option>
+                        <option value="Sí">Sí</option>
+                        <option value="No">No</option>
+                    </select>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Tipo de Falla</label>
+                    <input name="tipo_falla" class="form-control" list="listaFallas" placeholder="Escriba o seleccione...">
+                    <datalist id="listaFallas">
+                        {% for t in tipos_falla %}<option value="{{ t }}">{% endfor %}
+                    </datalist>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Status</label>
+                    <select name="status" class="form-select">
+                        <option value="">-- Seleccione --</option>
+                        <option value="Pendiente">Pendiente</option>
+                        <option value="En proceso">En proceso</option>
+                        <option value="Resuelto">Resuelto</option>
+                        <option value="No resuelto">No resuelto</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Responsable</label>
+                    <input name="responsable" class="form-control" list="listaTecnicos" placeholder="Escriba o seleccione...">
+                    <datalist id="listaTecnicos">
+                        {% for t in tecnicos %}
+                        <option value="{{ t }}">
+                        {% endfor %}
+                    </datalist>
+                </div>
+                <div class="col-12">
+                    <label class="form-label">Observaciones</label>
+                    <textarea name="observaciones" class="form-control" rows="2"></textarea>
+                </div>
+            </div>
+            <div class="mt-3">
+                <button type="submit" class="btn btn-amarillo"><i class="fas fa-save"></i> Agregar Ticket</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Carga de archivo -->
+<div class="card mb-4">
+    <div class="card-header card-header-blue">
+        <i class="fas fa-upload me-2"></i> Cargar Archivo
+    </div>
+    <div class="card-body">
+        <form method="POST" action="{{ url_for('cargar_tickets') }}" enctype="multipart/form-data">
+            <div class="input-group">
+                <input type="file" name="archivo" class="form-control" accept=".xlsx,.csv">
+                <button class="btn btn-amarillo" type="submit"><i class="fas fa-upload"></i> Importar</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Buscador -->
+<div class="mb-3">
+    <input type="text" id="buscadorTickets" class="form-control" placeholder="Buscar tickets...">
+</div>
+
+<!-- Tabla de tickets -->
+<div class="card">
+    <div class="card-header card-header-yellow">
+        <i class="fas fa-list me-2"></i> Lista de Tickets
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle">
+                <thead class="table-dark">
+                    <tr>
+                        <th>N° Ticket</th>
+                        <th>Fecha</th>
+                        <th>Cliente</th>
+                        <th>Motivo</th>
+                        <th>Tipo Falla</th>
+                        <th>Status</th>
+                        <th>Responsable</th>
+                        <th>Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for ticket in tickets %}
+                    <tr>
+                        <td>{{ ticket.num_ticket }}</td>
+                        <td>{{ ticket.fecha.strftime('%d/%m/%Y') if ticket.fecha else '' }}</td>
+                        <td>{{ ticket.cliente }}</td>
+                        <td>{{ ticket.motivo_ticket }}</td>
+                        <td>{{ ticket.tipo_falla }}</td>
+                        <td>
+                            {% if ticket.status == 'Pendiente' %}
+                            <span class="badge bg-warning">Pendiente</span>
+                            {% elif ticket.status == 'En proceso' %}
+                            <span class="badge bg-info">En proceso</span>
+                            {% elif ticket.status == 'Resuelto' %}
+                            <span class="badge bg-success">Resuelto</span>
+                            {% elif ticket.status == 'No resuelto' %}
+                            <span class="badge bg-danger">No resuelto</span>
+                            {% else %}
+                            <span class="badge bg-secondary">{{ ticket.status }}</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ ticket.responsable }}</td>
+                        <td>
+                            <a href="{{ url_for('detalle_ticket', ticket_id=ticket.id) }}" class="btn btn-sm btn-primary" title="Ver"><i class="fas fa-eye"></i></a>
+                            <a href="{{ url_for('editar_ticket', ticket_id=ticket.id) }}" class="btn btn-sm btn-success" title="Editar"><i class="fas fa-pencil-alt"></i></a>
+                            <form method="POST" action="{{ url_for('eliminar_ticket', ticket_id=ticket.id) }}" style="display:inline;" onsubmit="return confirm('¿Eliminar este ticket?')">
+                                <button type="submit" class="btn btn-sm btn-danger" title="Eliminar"><i class="fas fa-trash-alt"></i></button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script>
+$(document).ready(function() {
+    // Búsqueda de cliente para agregar ticket
+    $('#buscarCliente').on('keypress', function(e) {
+        if (e.which === 13) {
+            e.preventDefault();
+            var texto = $(this).val().trim();
+            if (texto) buscarCliente(texto);
+        }
+    });
+
+    function buscarCliente(texto) {
+        $.get('/api/buscar_cliente_json', { q: texto }, function(data) {
+            if (data.length === 1) {
+                $('#cliente_id').val(data[0].id);
+                $('#buscarCliente').val(data[0].nombre);
+                $('#mensajeCliente').hide();
+            } else if (data.length > 1) {
+                var lista = '<ul class="list-group">';
+                data.forEach(function(c) {
+                    lista += '<li class="list-group-item list-group-item-action" data-id="'+c.id+'">'+c.nombre+' ('+c.contrato+')</li>';
+                });
+                lista += '</ul>';
+                $('#mensajeCliente').html('Varios clientes encontrados. Seleccione uno: ' + lista).show();
+                $('.list-group-item').on('click', function() {
+                    var id = $(this).data('id');
+                    $('#cliente_id').val(id);
+                    $('#buscarCliente').val($(this).text().split(' (')[0]);
+                    $('#mensajeCliente').hide();
+                });
+            } else {
+                $('#cliente_id').val('');
+                $('#mensajeCliente').text('Cliente no encontrado').show();
+            }
+        });
+    }
+
+    // Filtro en tabla de tickets
+    $('#buscadorTickets').on('keyup', function() {
+        var value = $(this).val().toLowerCase();
+        $('table tbody tr').filter(function() {
+            $(this).toggle($(this).text().toLowerCase().indexOf(value) > -1);
+        });
+    });
+});
+</script>
+{% endblock %}

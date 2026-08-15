@@ -1,0 +1,165 @@
+{% extends "base.html" %}
+{% block title %}Clientes{% endblock %}
+{% block heading %}Gestión de Clientes{% endblock %}
+{% block breadcrumb %}Listado, búsqueda y carga de clientes{% endblock %}
+
+{% block content %}
+<!-- Formulario para agregar cliente -->
+<div class="card mb-4">
+    <div class="card-header card-header-blue">
+        <i class="fas fa-user-plus me-2"></i> Agregar Cliente
+    </div>
+    <div class="card-body">
+        <form method="POST" action="{{ url_for('agregar_cliente') }}">
+            <div class="row g-3">
+                <div class="col-md-4">
+                    <label class="form-label">Nombre y Apellido *</label>
+                    <input type="text" name="nombre_apellido" class="form-control" placeholder="Ej: Juan Pérez" required>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">N° Contrato</label>
+                    <input type="text" name="n_contrato" class="form-control" placeholder="Ej: 1234">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">N° Documento</label>
+                    <input type="text" name="n_documento" class="form-control" placeholder="Cédula/RIF">
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">Teléfono</label>
+                    <input type="text" name="telefono" class="form-control" placeholder="0412-1234567">
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Dirección del servicio</label>
+                    <input type="text" name="direccion_servicio" class="form-control" placeholder="Calle, edificio, apto...">
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">Nodo</label>
+                    <input type="text" name="nodo" class="form-control" list="listaNodosAgregar" placeholder="Nodo">
+                    <datalist id="listaNodosAgregar">
+                        {% for n in nodos %}<option value="{{ n }}">{% endfor %}
+                    </datalist>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">Mbps contratados</label>
+                    <input type="number" name="mbps_contratados" class="form-control" placeholder="6">
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">Estatus</label>
+                    <select name="estatus_usuario" class="form-select">
+                        <option value="ACTIVO">ACTIVO</option>
+                        <option value="INACTIVO">INACTIVO</option>
+                        <option value="SUSPENDIDO">SUSPENDIDO</option>
+                        <option value="CORTESÍA">CORTESÍA</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Asignador</label>
+                    <input type="text" name="asignador" class="form-control" placeholder="Quién asignó la instalación" list="listaAsignadores">
+                    <datalist id="listaAsignadores"></datalist>
+                </div>
+            </div>
+            <div class="mt-3">
+                <button type="submit" class="btn btn-amarillo"><i class="fas fa-save"></i> Agregar Cliente</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Carga masiva -->
+<div class="card mb-4">
+    <div class="card-header card-header-green">
+        <i class="fas fa-upload me-2"></i> Importar Clientes desde Archivo
+    </div>
+    <div class="card-body">
+        <form method="POST" action="{{ url_for('cargar_clientes') }}" enctype="multipart/form-data">
+            <div class="input-group">
+                <input type="file" name="archivo" class="form-control" accept=".xlsx,.csv" required>
+                <button class="btn btn-amarillo" type="submit"><i class="fas fa-upload"></i> Importar</button>
+            </div>
+            <small class="text-muted">Formatos soportados: .xlsx, .csv. Columnas esperadas: n_contrato, n_documento, nombre_apellido, telefono, direccion_servicio, nodo, mbps_contratados, estatus_usuario.</small>
+        </form>
+    </div>
+</div>
+
+<!-- Buscador -->
+<div class="mb-3">
+    <input type="text" id="buscadorClientes" class="form-control" placeholder="Buscar clientes por nombre, contrato, documento, teléfono o nodo...">
+</div>
+
+<!-- Tabla de clientes -->
+<div class="card">
+    <div class="card-header card-header-blue">
+        <i class="fas fa-list me-2"></i> Lista de Clientes
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle" id="tablaClientes">
+                <thead class="table-dark">
+                    <tr>
+                        <th>ID</th>
+                        <th>Contrato</th>
+                        <th>Nombre</th>
+                        <th>Teléfono</th>
+                        <th>Nodo</th>
+                        <th>Mbps</th>
+                        <th>Estatus</th>
+                        <th>Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for cliente in clientes %}
+                    <tr>
+                        <td>{{ cliente.id }}</td>
+                        <td>{{ cliente.n_contrato or '—' }}</td>
+                        <td>{{ cliente.nombre_apellido or '—' }}</td>
+                        <td>{{ cliente.telefono or '—' }}</td>
+                        <td>{{ cliente.nodo or '—' }}</td>
+                        <td>{{ cliente.mbps_contratados or '—' }}</td>
+                        <td>
+                            <span class="badge {% if cliente.estatus_usuario == 'ACTIVO' %}badge-activo{% elif cliente.estatus_usuario == 'INACTIVO' %}badge-inactivo{% else %}badge-pendiente{% endif %}">
+                                {{ cliente.estatus_usuario or '—' }}
+                            </span>
+                        </td>
+                        <td>
+                            <a href="{{ url_for('detalle_cliente', cliente_id=cliente.id) }}" class="btn btn-sm btn-primary" title="Ver detalle"><i class="fas fa-eye"></i></a>
+                            <a href="{{ url_for('editar_cliente', cliente_id=cliente.id) }}" class="btn btn-sm btn-success" title="Editar"><i class="fas fa-pencil-alt"></i></a>
+                            <form method="POST" action="{{ url_for('eliminar_cliente', cliente_id=cliente.id) }}" style="display:inline;" onsubmit="return confirm('¿Eliminar este cliente?')">
+                                <button type="submit" class="btn btn-sm btn-danger" title="Eliminar"><i class="fas fa-trash-alt"></i></button>
+                            </form>
+                            <a href="{{ url_for('planilla_soporte') }}?cliente_id={{ cliente.id }}" class="btn btn-sm btn-amarillo" title="Generar planilla"><i class="fas fa-file-pdf"></i></a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Filtro en tabla de clientes
+document.getElementById('buscadorClientes').addEventListener('keyup', function() {
+    const value = this.value.toLowerCase();
+    const rows = document.querySelectorAll('#tablaClientes tbody tr');
+    rows.forEach(row => {
+        const text = row.textContent.toLowerCase();
+        row.style.display = text.indexOf(value) > -1 ? '' : 'none';
+    });
+});
+
+// Cargar asignadores para datalist
+fetch('/api/asignadores')
+    .then(r => r.json())
+    .then(data => {
+        const datalist = document.getElementById('listaAsignadores');
+        data.forEach(nombre => {
+            const option = document.createElement('option');
+            option.value = nombre;
+            datalist.appendChild(option);
+        });
+    })
+    .catch(err => console.error('Error cargando asignadores:', err));
+</script>
+{% endblock %}

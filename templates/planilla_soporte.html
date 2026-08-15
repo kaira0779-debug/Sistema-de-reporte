@@ -1,0 +1,294 @@
+{% extends "base.html" %}
+{% block title %}Planilla de Soporte{% endblock %}
+{% block heading %}Planilla de Soporte{% endblock %}
+{% block breadcrumb %}Generar órdenes de servicio técnico{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-lg-12">
+        <div class="card mb-4">
+            <div class="card-header card-header-green">
+                <i class="fas fa-magic me-2"></i> Generar Planilla de Cliente
+            </div>
+            <div class="card-body">
+                <form id="formGenerarPlanilla" method="POST" action="{{ url_for('generar_planilla_cliente') }}">
+                    <div class="mb-3">
+                        <label class="form-label">Buscar Cliente *</label>
+                        <input type="text" id="buscarCliente" class="form-control" placeholder="Buscar por nombre, cédula, contrato, teléfono, dirección o nodo...">
+                        <input type="hidden" name="cliente_id" id="cliente_id">
+                        <div id="mensajeCliente" class="text-danger small mt-1" style="display:none;"></div>
+                    </div>
+
+                    <div id="previewCliente" class="mb-3 p-3 bg-light rounded" style="display: none; border-left: 4px solid var(--primary);">
+                        <h6><i class="fas fa-user-check me-2" style="color: var(--primary);"></i>Datos del cliente</h6>
+                        <div class="row g-2">
+                            <div class="col-md-6"><strong>Contrato:</strong> <span id="prevContrato"></span></div>
+                            <div class="col-md-6"><strong>Documento:</strong> <span id="prevDocumento"></span></div>
+                            <div class="col-md-6"><strong>Nombre:</strong> <span id="prevNombre"></span></div>
+                            <div class="col-md-6"><strong>Teléfono:</strong> <span id="prevTelefono"></span></div>
+                            <div class="col-12"><strong>Dirección:</strong> <span id="prevDireccion"></span></div>
+                            <div class="col-md-4"><strong>Nodo:</strong> <span id="prevNodo"></span></div>
+                            <div class="col-md-4"><strong>Mbps:</strong> <span id="prevMbps"></span></div>
+                            <div class="col-md-4"><strong>Estatus:</strong> <span id="prevEstatus"></span></div>
+                            <div class="col-12"><strong>Asignador:</strong> <span id="prevAsignador"></span></div>
+                        </div>
+                    </div>
+
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <label class="form-label">Número de Ticket (opcional)</label>
+                            <input type="text" name="num_ticket" class="form-control" placeholder="Ej: 2026-5001">
+                            <small class="text-muted">Si se deja vacío, se generará automáticamente.</small>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Hora de Inicio</label>
+                            <input type="time" name="hora_inicio" class="form-control">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Hora de Fin</label>
+                            <input type="time" name="hora_fin" class="form-control">
+                        </div>
+                    </div>
+
+                    <div class="row g-3 mt-2">
+                        <div class="col-md-6">
+                            <label class="form-label">Motivo de Ticket</label>
+                            <select name="motivo_ticket" class="form-select">
+                                <option value="">-- Seleccione --</option>
+                                {% for m in motivos %}<option value="{{ m }}">{{ m }}</option>{% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Tipo de Falla</label>
+                            <select name="tipo_falla" class="form-select">
+                                <option value="">-- Seleccione --</option>
+                                {% for t in tipos_falla %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="mb-3 mt-3">
+                        <label class="form-label">Técnico Asignado</label>
+                        <select name="tecnico_id" id="tecnico_id" class="form-select">
+                            <option value="">-- Seleccione --</option>
+                        </select>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Observaciones adicionales</label>
+                        <textarea name="observaciones_adicionales" class="form-control" rows="4" 
+                                  placeholder="Escriba aquí observaciones, notas o detalles extra que deban aparecer en la planilla..."></textarea>
+                    </div>
+
+                    <button type="button" class="btn btn-amarillo" id="btnGenerar">
+                        <i class="fas fa-file-pdf"></i> Generar Planilla PDF
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header card-header-purple d-flex justify-content-between align-items-center">
+        <span><i class="fas fa-list-alt me-2"></i> Planillas Generadas</span>
+        <button type="button" class="btn btn-sm btn-outline-danger" id="btnEliminarSeleccionadas" onclick="eliminarSeleccionadas()">
+            <i class="fas fa-trash-alt"></i> Eliminar seleccionadas
+        </button>
+    </div>
+    <div class="card-body">
+        {% if generados %}
+        <form id="formEliminarSeleccionadas" method="POST" action="{{ url_for('eliminar_seleccionadas') }}">
+            <div class="table-responsive">
+                <table class="table table-hover align-middle">
+                    <thead class="table-dark">
+                        <tr>
+                            <th><input type="checkbox" id="seleccionarTodos" onclick="toggleAll(this)"></th>
+                            <th>Fecha</th>
+                            <th>Cliente</th>
+                            <th>Archivo</th>
+                            <th>Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for g in generados %}
+                        <tr>
+                            <td><input type="checkbox" name="archivos" value="{{ g.archivo }}"></td>
+                            <td>{{ g.fecha }}</td>
+                            <td>{{ g.cliente }}</td>
+                            <td>{{ g.archivo }}</td>
+                            <td>
+                                <a href="{{ url_for('descargar_generado', filename=g.archivo) }}" class="btn btn-sm btn-amarillo" title="Descargar PDF"><i class="fas fa-download"></i></a>
+                                <button type="button" class="btn btn-sm btn-danger btn-eliminar" data-filename="{{ g.archivo }}" title="Eliminar"><i class="fas fa-trash-alt"></i></button>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </form>
+        {% else %}
+        <p class="text-muted">Aún no se ha generado ninguna planilla.</p>
+        {% endif %}
+    </div>
+</div>
+
+<form id="formEliminar" method="POST" style="display: none;"></form>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script>
+$(document).ready(function() {
+    // Obtener parámetros de la URL para precarga
+    const urlParams = new URLSearchParams(window.location.search);
+    const clienteNombre = urlParams.get('cliente_nombre');
+    const motivo = urlParams.get('motivo');
+    const tipoFalla = urlParams.get('tipo_falla');
+    const observaciones = urlParams.get('observaciones');
+
+    if (clienteNombre) {
+        document.getElementById('buscarCliente').value = clienteNombre;
+        // Buscar y seleccionar el cliente automáticamente
+        buscarYMostrarCliente(clienteNombre).then(ok => {
+            if (ok) {
+                if (observaciones) {
+                    document.querySelector('textarea[name="observaciones_adicionales"]').value = observaciones;
+                }
+                if (motivo) {
+                    document.querySelector('select[name="motivo_ticket"]').value = motivo;
+                }
+                if (tipoFalla) {
+                    document.querySelector('select[name="tipo_falla"]').value = tipoFalla;
+                }
+            }
+        });
+    }
+
+    function cargarTecnicos() {
+        fetch('/api/tecnicos_json')
+            .then(r => r.json())
+            .then(data => {
+                const select = document.getElementById('tecnico_id');
+                select.innerHTML = '<option value="">-- Seleccione --</option>';
+                if (data.length === 0) {
+                    select.innerHTML = '<option value="">No hay técnicos disponibles</option>';
+                } else {
+                    data.forEach(t => {
+                        const option = document.createElement('option');
+                        option.value = t.id;
+                        option.textContent = `${t.nombre_completo} (${t.username})`;
+                        select.appendChild(option);
+                    });
+                }
+            })
+            .catch(error => console.error('Error al cargar técnicos:', error));
+    }
+    cargarTecnicos();
+
+    let timeoutBusqueda;
+    async function buscarYMostrarCliente(texto) {
+        if (!texto) {
+            $('#previewCliente').hide();
+            $('#cliente_id').val('');
+            $('#mensajeCliente').hide();
+            return true;
+        }
+        try {
+            const resp = await fetch(`/api/buscar_cliente_json?q=${encodeURIComponent(texto)}`);
+            const data = await resp.json();
+            if (data.length === 1) {
+                const cliente = data[0];
+                $('#cliente_id').val(cliente.id);
+                $('#prevContrato').text(cliente.contrato || '—');
+                $('#prevDocumento').text(cliente.documento || '—');
+                $('#prevNombre').text(cliente.nombre || '—');
+                $('#prevTelefono').text(cliente.telefono || '—');
+                $('#prevDireccion').text(cliente.direccion || '—');
+                $('#prevNodo').text(cliente.nodo || '—');
+                $('#prevMbps').text(cliente.mbps || '—');
+                $('#prevEstatus').text(cliente.estatus || '—');
+                $('#prevAsignador').text(cliente.asignador || '—');
+                $('#previewCliente').show();
+                $('#mensajeCliente').hide();
+                return true;
+            } else if (data.length > 1) {
+                let datalist = $('#listaClientes');
+                if (!datalist.length) datalist = $('<datalist id="listaClientes"></datalist>').appendTo('body');
+                datalist.empty();
+                data.forEach(c => datalist.append(`<option value="${c.nombre} (${c.contrato || 'sin contrato'})">`));
+                $('#buscarCliente').attr('list', 'listaClientes');
+                $('#cliente_id').val('');
+                $('#previewCliente').hide();
+                $('#mensajeCliente').text('Hay varios clientes coincidentes. Seleccione uno de la lista.').show();
+                return false;
+            } else {
+                $('#cliente_id').val('');
+                $('#previewCliente').hide();
+                $('#mensajeCliente').text('No se encontró ningún cliente con ese dato.').show();
+                return false;
+            }
+        } catch (error) {
+            console.error('Error en búsqueda:', error);
+            $('#mensajeCliente').text('Error al buscar cliente.').show();
+            return false;
+        }
+    }
+
+    $('#buscarCliente').on('keypress', function(e) {
+        if (e.which === 13) {
+            e.preventDefault();
+            const texto = $(this).val().trim();
+            if (texto) buscarYMostrarCliente(texto);
+        }
+    });
+    $('#buscarCliente').on('change', function() {
+        const texto = $(this).val().trim();
+        if (texto) buscarYMostrarCliente(texto);
+    });
+
+    $('#btnGenerar').on('click', async function() {
+        const texto = $('#buscarCliente').val().trim();
+        if (!texto) {
+            $('#mensajeCliente').text('Debe escribir un nombre, cédula, contrato u otro dato.').show();
+            return;
+        }
+        const clienteId = $('#cliente_id').val();
+        if (!clienteId) {
+            const ok = await buscarYMostrarCliente(texto);
+            if (!ok) {
+                $('#mensajeCliente').text('Seleccione un cliente de la lista antes de generar.').show();
+                return;
+            }
+        }
+        const tecnicoId = $('#tecnico_id').val();
+        if (!tecnicoId || tecnicoId === '') {
+            alert('Por favor, seleccione un técnico asignado.');
+            return;
+        }
+        $('#formGenerarPlanilla').submit();
+    });
+
+    $('.btn-eliminar').on('click', function() {
+        const filename = $(this).data('filename');
+        if (confirm('¿Eliminar esta planilla?')) {
+            $('#formEliminar').attr('action', '/planilla_soporte/eliminar_generado/' + filename).submit();
+        }
+    });
+
+    window.eliminarSeleccionadas = function() {
+        const checked = document.querySelectorAll('input[name="archivos"]:checked');
+        if (checked.length === 0) {
+            alert('Seleccione al menos una planilla.');
+            return;
+        }
+        if (confirm(`¿Está seguro de eliminar ${checked.length} planilla(s)?`)) {
+            document.getElementById('formEliminarSeleccionadas').submit();
+        }
+    };
+    window.toggleAll = function(source) {
+        document.querySelectorAll('input[name="archivos"]').forEach(cb => cb.checked = source.checked);
+    };
+});
+</script>
+{% endblock %}

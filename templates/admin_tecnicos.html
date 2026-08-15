@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}Gestión de Técnicos{% endblock %}
+{% block heading %}Gestión de Técnicos{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-lg-4">
+        <div class="card mb-4">
+            <div class="card-header">
+                <i class="fas fa-user-plus me-2" style="color: var(--primary);"></i> Registrar Técnico
+            </div>
+            <div class="card-body">
+                <form method="POST">
+                    <div class="mb-3">
+                        <label class="form-label">Nombre de usuario *</label>
+                        <input name="username" class="form-control" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Nombre completo *</label>
+                        <input name="nombre_completo" class="form-control" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Cédula</label>
+                        <input name="cedula" class="form-control" placeholder="V-12345678">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Contraseña *</label>
+                        <input type="password" name="password" class="form-control" required>
+                    </div>
+                    <button type="submit" class="btn btn-amarillo"><i class="fas fa-save"></i> Registrar</button>
+                </form>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-8">
+        <div class="card">
+            <div class="card-header">
+                <i class="fas fa-list me-2" style="color: var(--primary);"></i> Técnicos Registrados
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead class="table-dark">
+                            <tr>
+                                <th>ID</th>
+                                <th>Usuario</th>
+                                <th>Nombre Completo</th>
+                                <th>Cédula</th>
+                                <th>Estado</th>
+                                <th>Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for t in tecnicos %}
+                            <tr>
+                                <td>{{ t.id }}</td>
+                                <td>{{ t.username }}</td>
+                                <td>{{ t.nombre_completo }}</td>
+                                <td>{{ t.cedula or '—' }}</td>
+                                <td>
+                                    {% if t.online == 1 %}
+                                    <span class="badge bg-success">Conectado</span>
+                                    {% else %}
+                                    <span class="badge bg-secondary">Desconectado</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <form method="POST" action="{{ url_for('eliminar_tecnico', id=t.id) }}" onsubmit="return confirm('¿Eliminar este técnico?')">
+                                        <button class="btn btn-sm btn-outline-danger"><i class="fas fa-trash-alt"></i></button>
+                                    </form>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
