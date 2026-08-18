@@ -59,4 +59,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
     init();
     animate();
+
+    console.log('Texto buscado:', filtro);
+
+    function seleccionarCliente(cliente) {
+    $clienteId.val(cliente.id);
+    $inputCliente.val(cliente.nombre); // Asegúrate de que 'cliente.nombre' existe
+    $('#cliente_nombre_busqueda').val(cliente.nombre); // Respaldo
+    actualizarNodo(cliente.nodo || '');
+    $resultadosClientes.hide().empty();
+    $mensajeCliente.text('').hide();
+    mostrarCliente(cliente);
+    console.log('Cliente seleccionado:', cliente);
+}
 });

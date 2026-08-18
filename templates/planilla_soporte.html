@@ -1,86 +1,56 @@
 {% extends "base.html" %}
 {% block title %}Planilla de Soporte{% endblock %}
 {% block heading %}Planilla de Soporte{% endblock %}
-{% block breadcrumb %}Generar órdenes de servicio técnico{% endblock %}
 
 {% block content %}
 <div class="row">
     <div class="col-lg-12">
-        <div class="card mb-4">
-            <div class="card-header card-header-green">
-                <i class="fas fa-magic me-2"></i> Generar Planilla de Cliente
-            </div>
+        <div class="card">
+            <div class="card-header"><i class="fas fa-file-pdf"></i> Generar Planilla</div>
             <div class="card-body">
-                <form id="formGenerarPlanilla" method="POST" action="{{ url_for('generar_planilla_cliente') }}">
+                <form id="formGenerarPlanilla" method="POST" action="/planilla_soporte/generar_planilla">
+                    
+                    <!-- Buscador de Ticket (opcional, puede dejarse en blanco si se selecciona un cliente manualmente) -->
+                    <div class="mb-3 position-relative">
+                        <label class="form-label">Buscar Ticket (opcional)</label>
+                        <input type="text" id="buscarTicket" class="form-control" placeholder="Escriba número de ticket, cliente, etc..." autocomplete="off">
+                        <input type="hidden" name="ticket_id" id="ticket_id" value="{{ ticket.id if ticket else '' }}">
+                        <div id="resultadosTickets" class="dropdown-result" style="display:none;"></div>
+                        <small class="text-muted">Puede seleccionar un ticket para autocompletar los campos, o buscar un cliente directamente.</small>
+                    </div>
+
+                    <!-- Cliente con búsqueda manual -->
+                    <div class="mb-3 position-relative">
+                        <label class="form-label">Cliente *</label>
+                        <input type="text" id="buscarCliente" class="form-control" placeholder="Buscar cliente por nombre, documento, contrato..." autocomplete="off" required>
+                        <input type="hidden" name="cliente_id" id="cliente_id" value="{{ cliente.id if cliente else '' }}">
+                        <input type="hidden" name="cliente_nombre_busqueda" id="cliente_nombre_busqueda" value="{{ cliente.nombre_apellido if cliente else '' }}">
+                        <div id="resultadosClientes" class="dropdown-result" style="display:none;"></div>
+                        <div id="mensajeCliente" class="text-danger small mt-1"></div>
+                    </div>
+
+                    <!-- Resumen del ticket seleccionado -->
+                    <div id="ticketResumen" class="alert alert-info mt-3" style="display: {% if ticket %}block{% else %}none{% endif %};">
+                        <h6><i class="fas fa-info-circle"></i> Datos del Ticket</h6>
+                        <p><strong>Ticket:</strong> <span id="resumenTicketNum">{{ ticket.num_ticket if ticket else '' }}</span></p>
+                        <p><strong>Motivo:</strong> <span id="resumenMotivo">{{ ticket.motivo_ticket if ticket else '' }}</span></p>
+                        <p><strong>Tipo Falla:</strong> <span id="resumenTipoFalla">{{ ticket.tipo_falla if ticket else '' }}</span></p>
+                        <p><strong>Observaciones:</strong> <span id="resumenObservaciones">{{ ticket.observaciones if ticket else '' }}</span></p>
+                        <p><strong>Cliente:</strong> <span id="resumenCliente">{{ ticket.cliente if ticket else '' }}</span></p>
+                        <p><strong>Técnico Asignado:</strong> <span id="resumenTecnico">{% if ticket.tecnico_id %}{{ ticket.tecnico_nombre if ticket.tecnico_nombre else '' }}{% else %}{{ ticket.responsable }}{% endif %}</span></p>
+                    </div>
+
+                    <!-- Tipo de Planilla -->
                     <div class="mb-3">
-                        <label class="form-label">Buscar Cliente *</label>
-                        <input type="text" id="buscarCliente" class="form-control" placeholder="Buscar por nombre, cédula, contrato, teléfono, dirección o nodo...">
-                        <input type="hidden" name="cliente_id" id="cliente_id">
-                        <div id="mensajeCliente" class="text-danger small mt-1" style="display:none;"></div>
-                    </div>
-
-                    <div id="previewCliente" class="mb-3 p-3 bg-light rounded" style="display: none; border-left: 4px solid var(--primary);">
-                        <h6><i class="fas fa-user-check me-2" style="color: var(--primary);"></i>Datos del cliente</h6>
-                        <div class="row g-2">
-                            <div class="col-md-6"><strong>Contrato:</strong> <span id="prevContrato"></span></div>
-                            <div class="col-md-6"><strong>Documento:</strong> <span id="prevDocumento"></span></div>
-                            <div class="col-md-6"><strong>Nombre:</strong> <span id="prevNombre"></span></div>
-                            <div class="col-md-6"><strong>Teléfono:</strong> <span id="prevTelefono"></span></div>
-                            <div class="col-12"><strong>Dirección:</strong> <span id="prevDireccion"></span></div>
-                            <div class="col-md-4"><strong>Nodo:</strong> <span id="prevNodo"></span></div>
-                            <div class="col-md-4"><strong>Mbps:</strong> <span id="prevMbps"></span></div>
-                            <div class="col-md-4"><strong>Estatus:</strong> <span id="prevEstatus"></span></div>
-                            <div class="col-12"><strong>Asignador:</strong> <span id="prevAsignador"></span></div>
-                        </div>
-                    </div>
-
-                    <div class="row g-3">
-                        <div class="col-md-4">
-                            <label class="form-label">Número de Ticket (opcional)</label>
-                            <input type="text" name="num_ticket" class="form-control" placeholder="Ej: 2026-5001">
-                            <small class="text-muted">Si se deja vacío, se generará automáticamente.</small>
-                        </div>
-                        <div class="col-md-4">
-                            <label class="form-label">Hora de Inicio</label>
-                            <input type="time" name="hora_inicio" class="form-control">
-                        </div>
-                        <div class="col-md-4">
-                            <label class="form-label">Hora de Fin</label>
-                            <input type="time" name="hora_fin" class="form-control">
-                        </div>
-                    </div>
-
-                    <div class="row g-3 mt-2">
-                        <div class="col-md-6">
-                            <label class="form-label">Motivo de Ticket</label>
-                            <select name="motivo_ticket" class="form-select">
-                                <option value="">-- Seleccione --</option>
-                                {% for m in motivos %}<option value="{{ m }}">{{ m }}</option>{% endfor %}
-                            </select>
-                        </div>
-                        <div class="col-md-6">
-                            <label class="form-label">Tipo de Falla</label>
-                            <select name="tipo_falla" class="form-select">
-                                <option value="">-- Seleccione --</option>
-                                {% for t in tipos_falla %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
-                            </select>
-                        </div>
-                    </div>
-
-                    <div class="mb-3 mt-3">
-                        <label class="form-label">Técnico Asignado</label>
-                        <select name="tecnico_id" id="tecnico_id" class="form-select">
-                            <option value="">-- Seleccione --</option>
+                        <label class="form-label">Tipo de Planilla *</label>
+                        <select name="tipo_planilla" id="tipoPlanilla" class="form-select" required>
+                            <option value="soporte" selected>Soporte</option>
+                            <option value="factibilidad">Factibilidad</option>
+                            <option value="instalacion">Instalación</option>
                         </select>
                     </div>
 
-                    <div class="mb-3">
-                        <label class="form-label">Observaciones adicionales</label>
-                        <textarea name="observaciones_adicionales" class="form-control" rows="4" 
-                                  placeholder="Escriba aquí observaciones, notas o detalles extra que deban aparecer en la planilla..."></textarea>
-                    </div>
-
-                    <button type="button" class="btn btn-amarillo" id="btnGenerar">
+                    <button type="submit" class="btn btn-amarillo">
                         <i class="fas fa-file-pdf"></i> Generar Planilla PDF
                     </button>
                 </form>
@@ -89,16 +59,17 @@
     </div>
 </div>
 
-<div class="card">
+<!-- Lista de planillas generadas -->
+<div class="card mt-4">
     <div class="card-header card-header-purple d-flex justify-content-between align-items-center">
         <span><i class="fas fa-list-alt me-2"></i> Planillas Generadas</span>
-        <button type="button" class="btn btn-sm btn-outline-danger" id="btnEliminarSeleccionadas" onclick="eliminarSeleccionadas()">
+        <button type="button" class="btn btn-sm btn-outline-light" id="btnEliminarSeleccionadas" onclick="eliminarSeleccionadas()">
             <i class="fas fa-trash-alt"></i> Eliminar seleccionadas
         </button>
     </div>
     <div class="card-body">
         {% if generados %}
-        <form id="formEliminarSeleccionadas" method="POST" action="{{ url_for('eliminar_seleccionadas') }}">
+        <form id="formEliminarSeleccionadas" method="POST" action="/planilla_soporte/eliminar_seleccionadas">
             <div class="table-responsive">
                 <table class="table table-hover align-middle">
                     <thead class="table-dark">
@@ -118,8 +89,10 @@
                             <td>{{ g.cliente }}</td>
                             <td>{{ g.archivo }}</td>
                             <td>
-                                <a href="{{ url_for('descargar_generado', filename=g.archivo) }}" class="btn btn-sm btn-amarillo" title="Descargar PDF"><i class="fas fa-download"></i></a>
-                                <button type="button" class="btn btn-sm btn-danger btn-eliminar" data-filename="{{ g.archivo }}" title="Eliminar"><i class="fas fa-trash-alt"></i></button>
+                                <div class="btn-group" role="group">
+                                    <a href="/planilla_soporte/descargar_generado/{{ g.archivo }}" class="btn btn-sm btn-amarillo" title="Descargar PDF"><i class="fas fa-download"></i></a>
+                                    <button type="button" class="btn btn-sm btn-outline-danger btn-eliminar" data-filename="{{ g.archivo }}" title="Eliminar"><i class="fas fa-trash-alt"></i></button>
+                                </div>
                             </td>
                         </tr>
                         {% endfor %}
@@ -134,161 +107,215 @@
 </div>
 
 <form id="formEliminar" method="POST" style="display: none;"></form>
-{% endblock %}
 
-{% block scripts %}
 <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 <script>
 $(document).ready(function() {
-    // Obtener parámetros de la URL para precarga
-    const urlParams = new URLSearchParams(window.location.search);
-    const clienteNombre = urlParams.get('cliente_nombre');
-    const motivo = urlParams.get('motivo');
-    const tipoFalla = urlParams.get('tipo_falla');
-    const observaciones = urlParams.get('observaciones');
+    // ======================
+    // FUNCIONES GLOBALES
+    // ======================
+    function mostrarCliente(cliente) {
+        // Actualizar campos ocultos y visibles
+        $('#cliente_id').val(cliente.id);
+        $('#buscarCliente').val(cliente.nombre || cliente.nombre_apellido || '');
+        $('#cliente_nombre_busqueda').val(cliente.nombre || cliente.nombre_apellido || '');
+        // Si hay ticket, actualizar resumen también (opcional)
+        if ($('#ticket_id').val()) {
+            // No sobrescribimos el resumen del ticket, solo actualizamos cliente
+            $('#resumenCliente').text(cliente.nombre || cliente.nombre_apellido || '');
+        }
+    }
 
-    if (clienteNombre) {
-        document.getElementById('buscarCliente').value = clienteNombre;
-        // Buscar y seleccionar el cliente automáticamente
-        buscarYMostrarCliente(clienteNombre).then(ok => {
-            if (ok) {
-                if (observaciones) {
-                    document.querySelector('textarea[name="observaciones_adicionales"]').value = observaciones;
+    function limpiarCliente() {
+        $('#cliente_id').val('');
+        $('#buscarCliente').val('');
+        $('#cliente_nombre_busqueda').val('');
+        $('#mensajeCliente').text('').hide();
+    }
+
+    // ======================
+    // BUSCADOR DE TICKET
+    // ======================
+    var timeoutTicket;
+    $('#buscarTicket').on('input', function() {
+        var q = $(this).val().trim();
+        clearTimeout(timeoutTicket);
+        if (q.length < 2) {
+            $('#resultadosTickets').hide().empty();
+            return;
+        }
+        timeoutTicket = setTimeout(function() {
+            $.get('/api/buscar_tickets_json', { q: q }, function(data) {
+                var html = '';
+                if (data.length === 0) {
+                    html = '<div class="list-group-item text-muted">No se encontraron tickets</div>';
+                } else {
+                    data.forEach(function(t) {
+                        html += '<a href="#" class="list-group-item list-group-item-action ticket-item" data-id="'+t.id+'">';
+                        html += '<strong>'+t.num_ticket+'</strong> - '+t.cliente+' - '+t.status;
+                        html += '</a>';
+                    });
                 }
-                if (motivo) {
-                    document.querySelector('select[name="motivo_ticket"]').value = motivo;
+                $('#resultadosTickets').html(html).show();
+                $('#resultadosTickets .ticket-item').off('mousedown').on('mousedown', function(e) {
+                    e.preventDefault();
+                    var ticketId = $(this).data('id');
+                    $('#buscarTicket').val($(this).text().trim());
+                    $('#resultadosTickets').hide();
+                    cargarDatosTicket(ticketId);
+                });
+            }).fail(function() {
+                $('#resultadosTickets').html('<div class="list-group-item text-danger">Error al buscar tickets</div>').show();
+            });
+        }, 300);
+    });
+
+    $('#buscarTicket').on('blur', function() {
+        setTimeout(function() { $('#resultadosTickets').hide(); }, 200);
+    });
+
+    function cargarDatosTicket(ticketId) {
+        $.get('/api/ticket/' + ticketId, function(response) {
+            var ticket = response.ticket;
+            var cliente = response.cliente;
+            var tecnico = response.tecnico;
+
+            // Guardar ticket_id
+            $('#ticket_id').val(ticket.id);
+
+            // Actualizar resumen
+            $('#resumenTicketNum').text(ticket.num_ticket || '');
+            $('#resumenMotivo').text(ticket.motivo_ticket || '');
+            $('#resumenTipoFalla').text(ticket.tipo_falla || '');
+            $('#resumenObservaciones').text(ticket.observaciones || '');
+            $('#resumenCliente').text(ticket.cliente || '');
+            if (tecnico) {
+                $('#resumenTecnico').text(tecnico.nombre_completo);
+            } else {
+                $('#resumenTecnico').text(ticket.responsable || 'No asignado');
+            }
+            $('#ticketResumen').show();
+
+            // Autocompletar cliente si existe en BD, si no usar el nombre del ticket
+            if (cliente) {
+                mostrarCliente(cliente);
+            } else {
+                // Si no hay cliente en BD, ponemos el nombre del ticket
+                $('#cliente_id').val('');
+                $('#buscarCliente').val(ticket.cliente || '');
+                $('#cliente_nombre_busqueda').val(ticket.cliente || '');
+            }
+        }).fail(function() {
+            alert('Error al cargar los datos del ticket.');
+        });
+    }
+
+    // ======================
+    // BUSCADOR DE CLIENTE
+    // ======================
+    var timeoutCliente;
+    var $inputCliente = $('#buscarCliente');
+    var $resultadosClientes = $('#resultadosClientes');
+    var $clienteId = $('#cliente_id');
+    var $clienteNombreBusqueda = $('#cliente_nombre_busqueda');
+    var $mensajeCliente = $('#mensajeCliente');
+
+    function buscarClientes(texto) {
+        if (texto.length < 2) {
+            $resultadosClientes.hide().empty();
+            return;
+        }
+        $.ajax({
+            url: '/api/buscar_cliente_json',
+            data: { q: texto },
+            dataType: 'json',
+            success: function(data) {
+                var html = '';
+                if (data.length === 0) {
+                    html = '<div class="list-group-item text-muted">No se encontraron clientes</div>';
+                } else {
+                    data.forEach(function(c) {
+                        html += '<a href="#" class="list-group-item list-group-item-action cliente-item" data-id="'+c.id+'">';
+                        html += '<strong>'+c.nombre+'</strong> (Contrato: '+c.contrato+', Doc: '+c.documento+')';
+                        html += '</a>';
+                    });
                 }
-                if (tipoFalla) {
-                    document.querySelector('select[name="tipo_falla"]').value = tipoFalla;
-                }
+                $resultadosClientes.html(html).show();
+                $resultadosClientes.find('.cliente-item').off('mousedown').on('mousedown', function(e) {
+                    e.preventDefault();
+                    var id = $(this).data('id');
+                    $.get('/api/cliente/' + id, function(cliente) {
+                        mostrarCliente(cliente);
+                        $resultadosClientes.hide();
+                        $mensajeCliente.text('').hide();
+                    }).fail(function() {
+                        $mensajeCliente.text('Error al cargar los datos del cliente.').show();
+                    });
+                });
+            },
+            error: function(xhr, status, error) {
+                console.error('Error en búsqueda de cliente:', status, error);
+                $resultadosClientes.html('<div class="list-group-item text-danger">Error al buscar clientes</div>').show();
+                $mensajeCliente.text('Error de conexión. Intente de nuevo.').show();
             }
         });
     }
 
-    function cargarTecnicos() {
-        fetch('/api/tecnicos_json')
-            .then(r => r.json())
-            .then(data => {
-                const select = document.getElementById('tecnico_id');
-                select.innerHTML = '<option value="">-- Seleccione --</option>';
-                if (data.length === 0) {
-                    select.innerHTML = '<option value="">No hay técnicos disponibles</option>';
-                } else {
-                    data.forEach(t => {
-                        const option = document.createElement('option');
-                        option.value = t.id;
-                        option.textContent = `${t.nombre_completo} (${t.username})`;
-                        select.appendChild(option);
-                    });
-                }
-            })
-            .catch(error => console.error('Error al cargar técnicos:', error));
-    }
-    cargarTecnicos();
-
-    let timeoutBusqueda;
-    async function buscarYMostrarCliente(texto) {
-        if (!texto) {
-            $('#previewCliente').hide();
-            $('#cliente_id').val('');
-            $('#mensajeCliente').hide();
-            return true;
-        }
-        try {
-            const resp = await fetch(`/api/buscar_cliente_json?q=${encodeURIComponent(texto)}`);
-            const data = await resp.json();
-            if (data.length === 1) {
-                const cliente = data[0];
-                $('#cliente_id').val(cliente.id);
-                $('#prevContrato').text(cliente.contrato || '—');
-                $('#prevDocumento').text(cliente.documento || '—');
-                $('#prevNombre').text(cliente.nombre || '—');
-                $('#prevTelefono').text(cliente.telefono || '—');
-                $('#prevDireccion').text(cliente.direccion || '—');
-                $('#prevNodo').text(cliente.nodo || '—');
-                $('#prevMbps').text(cliente.mbps || '—');
-                $('#prevEstatus').text(cliente.estatus || '—');
-                $('#prevAsignador').text(cliente.asignador || '—');
-                $('#previewCliente').show();
-                $('#mensajeCliente').hide();
-                return true;
-            } else if (data.length > 1) {
-                let datalist = $('#listaClientes');
-                if (!datalist.length) datalist = $('<datalist id="listaClientes"></datalist>').appendTo('body');
-                datalist.empty();
-                data.forEach(c => datalist.append(`<option value="${c.nombre} (${c.contrato || 'sin contrato'})">`));
-                $('#buscarCliente').attr('list', 'listaClientes');
-                $('#cliente_id').val('');
-                $('#previewCliente').hide();
-                $('#mensajeCliente').text('Hay varios clientes coincidentes. Seleccione uno de la lista.').show();
-                return false;
-            } else {
-                $('#cliente_id').val('');
-                $('#previewCliente').hide();
-                $('#mensajeCliente').text('No se encontró ningún cliente con ese dato.').show();
-                return false;
-            }
-        } catch (error) {
-            console.error('Error en búsqueda:', error);
-            $('#mensajeCliente').text('Error al buscar cliente.').show();
-            return false;
-        }
-    }
-
-    $('#buscarCliente').on('keypress', function(e) {
-        if (e.which === 13) {
-            e.preventDefault();
-            const texto = $(this).val().trim();
-            if (texto) buscarYMostrarCliente(texto);
-        }
-    });
-    $('#buscarCliente').on('change', function() {
-        const texto = $(this).val().trim();
-        if (texto) buscarYMostrarCliente(texto);
-    });
-
-    $('#btnGenerar').on('click', async function() {
-        const texto = $('#buscarCliente').val().trim();
-        if (!texto) {
-            $('#mensajeCliente').text('Debe escribir un nombre, cédula, contrato u otro dato.').show();
+    $inputCliente.on('input', function() {
+        var texto = $(this).val().trim();
+        clearTimeout(timeoutCliente);
+        if (texto.length < 2) {
+            $resultadosClientes.hide().empty();
+            $clienteId.val('');
+            $clienteNombreBusqueda.val('');
             return;
         }
-        const clienteId = $('#cliente_id').val();
-        if (!clienteId) {
-            const ok = await buscarYMostrarCliente(texto);
-            if (!ok) {
-                $('#mensajeCliente').text('Seleccione un cliente de la lista antes de generar.').show();
-                return;
-            }
-        }
-        const tecnicoId = $('#tecnico_id').val();
-        if (!tecnicoId || tecnicoId === '') {
-            alert('Por favor, seleccione un técnico asignado.');
-            return;
-        }
-        $('#formGenerarPlanilla').submit();
+        timeoutCliente = setTimeout(function() { buscarClientes(texto); }, 300);
     });
 
+    $inputCliente.on('blur', function() {
+        setTimeout(function() { $resultadosClientes.hide(); }, 200);
+    });
+
+    $inputCliente.on('focus', function() {
+        var texto = $(this).val().trim();
+        if (texto.length >= 2) buscarClientes(texto);
+    });
+
+    // ======================
+    // SI LA PÁGINA CARGÓ CON ticket_id, CARGARLO
+    // ======================
+    {% if ticket %}
+        cargarDatosTicket({{ ticket.id }});
+        $('#buscarTicket').val('{{ ticket.num_ticket }}');
+    {% endif %}
+
+    // ======================
+    // ELIMINAR PLANILLAS
+    // ======================
     $('.btn-eliminar').on('click', function() {
-        const filename = $(this).data('filename');
+        var filename = $(this).data('filename');
         if (confirm('¿Eliminar esta planilla?')) {
             $('#formEliminar').attr('action', '/planilla_soporte/eliminar_generado/' + filename).submit();
         }
     });
-
-    window.eliminarSeleccionadas = function() {
-        const checked = document.querySelectorAll('input[name="archivos"]:checked');
-        if (checked.length === 0) {
-            alert('Seleccione al menos una planilla.');
-            return;
-        }
-        if (confirm(`¿Está seguro de eliminar ${checked.length} planilla(s)?`)) {
-            document.getElementById('formEliminarSeleccionadas').submit();
-        }
-    };
-    window.toggleAll = function(source) {
-        document.querySelectorAll('input[name="archivos"]').forEach(cb => cb.checked = source.checked);
-    };
 });
+
+function eliminarSeleccionadas() {
+    var checked = document.querySelectorAll('input[name="archivos"]:checked');
+    if (checked.length === 0) {
+        alert('Seleccione al menos una planilla.');
+        return;
+    }
+    if (confirm('¿Está seguro de eliminar ' + checked.length + ' planilla(s)?')) {
+        document.getElementById('formEliminarSeleccionadas').submit();
+    }
+}
+
+function toggleAll(source) {
+    document.querySelectorAll('input[name="archivos"]').forEach(function(cb) {
+        cb.checked = source.checked;
+    });
+}
 </script>
 {% endblock %}

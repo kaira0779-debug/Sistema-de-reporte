@@ -1,68 +1,181 @@
 {% extends "base.html" %}
-{% block title %}Inicio{% endblock %}
-{% block heading %}Panel Principal{% endblock %}
-{% block breadcrumb %}Bienvenido, {{ current_user.nombre_completo }}{% endblock %}
+{% block title %}Dashboard{% endblock %}
+{% block heading %}Dashboard{% endblock %}
+
+{% block extra_css %}
+<style>
+    .welcome-banner {
+        background: linear-gradient(135deg, #0f0f0f 0%, #1a1a1a 100%);
+        color: #fff;
+        border-radius: 20px;
+        padding: 2.5rem 2rem;
+        margin-bottom: 2rem;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        box-shadow: 0 8px 25px rgba(0,0,0,0.2);
+    }
+    .welcome-banner h1 {
+        font-weight: 800;
+        font-size: 2rem;
+        color: #f1c40f;
+    }
+    .welcome-banner p {
+        color: #ccc;
+        margin-bottom: 0;
+    }
+    .stat-card {
+        border: none;
+        border-radius: 16px;
+        background: #fff;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+        transition: transform 0.2s, box-shadow 0.2s;
+        cursor: pointer;
+        text-decoration: none;
+        color: #1e293b;
+        display: block;
+        padding: 1.5rem;
+        height: 100%;
+    }
+    .stat-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 10px 25px rgba(241,196,15,0.3);
+        color: #1e293b;
+    }
+    .stat-icon {
+        width: 56px;
+        height: 56px;
+        border-radius: 14px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.8rem;
+        margin-bottom: 1rem;
+    }
+    .stat-icon.blue { background: #ebf5fb; color: #3498db; }
+    .stat-icon.green { background: #eafaf1; color: #2ecc71; }
+    .stat-icon.orange { background: #fdf2e9; color: #e67e22; }
+    .stat-icon.yellow { background: #fef9e7; color: #f1c40f; }
+    .stat-number {
+        font-size: 2.2rem;
+        font-weight: 800;
+        margin-bottom: 0.25rem;
+    }
+    .stat-label {
+        color: #64748b;
+        font-weight: 500;
+        font-size: 0.9rem;
+    }
+    .quick-actions .btn {
+        border-radius: 12px;
+        padding: 0.8rem 1.5rem;
+        font-weight: 600;
+    }
+    .recent-activity {
+        border-left: 4px solid #f1c40f;
+        padding-left: 1rem;
+    }
+</style>
+{% endblock %}
 
 {% block content %}
-<div class="row g-4">
-    {% if current_user.rol == 'admin' %}
-        <div class="col-lg-4 col-md-6">
-            <div class="card dashboard-card text-center p-4">
-                <div class="card-icon blue"><i class="fas fa-users"></i></div>
-                <h5 class="card-title">Clientes</h5>
-                <p class="card-text">Gestionar clientes registrados</p>
-                <a href="{{ url_for('clientes') }}" class="btn btn-primary w-100">Ir a Clientes</a>
+<div class="container-fluid">
+    <div class="welcome-banner">
+        <div>
+            <h1><i class="fas fa-hand-wave"></i> ¡Hola, {{ current_user.nombre_completo }}!</h1>
+            <p class="mt-2">Bienvenido al panel de administración de DATINVOZ. Resumen general del sistema.</p>
+        </div>
+        <div class="text-end">
+            <span class="rol-badge">{{ current_user.rol }}</span>
+            <div class="mt-2"><small class="text-muted">{{ now().strftime('%d/%m/%Y') }}</small></div>
+        </div>
+    </div>
+
+    <div class="row g-4 mb-4">
+        <div class="col-md-3">
+            <a href="/clientes" class="stat-card">
+                <div class="stat-icon green"><i class="fas fa-users"></i></div>
+                <div class="stat-number">{{ total_clientes }}</div>
+                <div class="stat-label">Clientes registrados</div>
+            </a>
+        </div>
+        <div class="col-md-3">
+            <a href="/tickets" class="stat-card">
+                <div class="stat-icon blue"><i class="fas fa-ticket-alt"></i></div>
+                <div class="stat-number">{{ total_tickets }}</div>
+                <div class="stat-label">Tickets emitidos</div>
+            </a>
+        </div>
+        <div class="col-md-3">
+            <a href="/admin/tecnicos" class="stat-card">
+                <div class="stat-icon orange"><i class="fas fa-user-cog"></i></div>
+                <div class="stat-number">{{ total_tecnicos }}</div>
+                <div class="stat-label">Técnicos activos</div>
+            </a>
+        </div>
+        <div class="col-md-3">
+            <a href="/planilla_soporte" class="stat-card">
+                <div class="stat-icon yellow"><i class="fas fa-file-pdf"></i></div>
+                <div class="stat-number"><i class="fas fa-arrow-right"></i></div>
+                <div class="stat-label">Generar planilla</div>
+            </a>
+        </div>
+    </div>
+
+    <div class="card mb-4">
+        <div class="card-header"><span><i class="fas fa-bolt"></i> Accesos rápidos</span></div>
+        <div class="card-body">
+            <div class="row g-2 quick-actions">
+                <div class="col-6 col-md-3">
+                    <a href="/clientes" class="btn btn-outline-dark w-100"><i class="fas fa-user-plus"></i> Nuevo cliente</a>
+                </div>
+                <div class="col-6 col-md-3">
+                    <a href="/tickets" class="btn btn-outline-dark w-100"><i class="fas fa-ticket-alt"></i> Nuevo ticket</a>
+                </div>
+                <div class="col-6 col-md-3">
+                    <a href="/graficas" class="btn btn-outline-dark w-100"><i class="fas fa-chart-bar"></i> Ver gráficas</a>
+                </div>
+                <div class="col-6 col-md-3">
+                    <a href="/admin/respaldos" class="btn btn-outline-dark w-100"><i class="fas fa-database"></i> Respaldos</a>
+                </div>
             </div>
         </div>
-        <div class="col-lg-4 col-md-6">
-            <div class="card dashboard-card text-center p-4">
-                <div class="card-icon purple"><i class="fas fa-chart-pie"></i></div>
-                <h5 class="card-title">Gráficas</h5>
-                <p class="card-text">Estadísticas de tickets y clientes</p>
-                <a href="{{ url_for('graficas') }}" class="btn btn-purple w-100">Ver Gráficas</a>
+    </div>
+
+    <div class="row g-4">
+        <div class="col-lg-6">
+            <div class="card h-100">
+                <div class="card-header"><span><i class="fas fa-clock"></i> Actividad reciente</span></div>
+                <div class="card-body">
+                    <div class="recent-activity">
+                        <p class="mb-2"><i class="fas fa-check-circle text-success"></i> Sistema operativo correctamente.</p>
+                        <p class="mb-2"><i class="fas fa-info-circle text-info"></i> Los tickets se generan automáticamente con numeración.</p>
+                        <p class="mb-2"><i class="fas fa-database text-warning"></i> Recuerde realizar respaldos periódicos.</p>
+                    </div>
+                </div>
             </div>
         </div>
-        <div class="col-lg-4 col-md-6">
-            <div class="card dashboard-card text-center p-4">
-                <div class="card-icon yellow"><i class="fas fa-ticket-alt"></i></div>
-                <h5 class="card-title">Tickets</h5>
-                <p class="card-text">Listado y gestión de tickets</p>
-                <a href="{{ url_for('tickets') }}" class="btn btn-amarillo w-100">Ver Tickets</a>
+        <div class="col-lg-6">
+            <div class="card h-100">
+                <div class="card-header"><span><i class="fas fa-cog"></i> Administración</span></div>
+                <div class="card-body">
+                    <ul class="list-group list-group-flush">
+                        <li class="list-group-item d-flex justify-content-between align-items-center">
+                            <a href="/admin/tecnicos">Técnicos</a>
+                            <span class="badge bg-primary">Gestionar</span>
+                        </li>
+                        <li class="list-group-item d-flex justify-content-between align-items-center">
+                            <a href="/admin/duplicados">Duplicados</a>
+                            <span class="badge bg-primary">Gestionar</span>
+                        </li>
+                        <li class="list-group-item d-flex justify-content-between align-items-center">
+                            <a href="/admin/respaldos">Respaldos</a>
+                            <span class="badge bg-primary">Gestionar</span>
+                        </li>
+                    </ul>
+                </div>
             </div>
         </div>
-        <div class="col-lg-4 col-md-6">
-            <div class="card dashboard-card text-center p-4">
-                <div class="card-icon green"><i class="fas fa-file-word"></i></div>
-                <h5 class="card-title">Planilla de Soporte</h5>
-                <p class="card-text">Generar órdenes de servicio</p>
-                <a href="{{ url_for('planilla_soporte') }}" class="btn btn-success w-100">Abrir</a>
-            </div>
-        </div>
-        <div class="col-lg-4 col-md-6">
-            <div class="card dashboard-card text-center p-4">
-                <div class="card-icon orange"><i class="fas fa-user-cog"></i></div>
-                <h5 class="card-title">Técnicos</h5>
-                <p class="card-text">Registrar y gestionar técnicos</p>
-                <a href="{{ url_for('admin_tecnicos') }}" class="btn btn-secondary w-100">Gestionar</a>
-            </div>
-        </div>
-        <div class="col-lg-4 col-md-6">
-            <div class="card dashboard-card text-center p-4">
-                <div class="card-icon red"><i class="fas fa-shield-alt"></i></div>
-                <h5 class="card-title">Panel Admin</h5>
-                <p class="card-text">Supervisión y mantenimiento</p>
-                <a href="{{ url_for('admin_panel') }}" class="btn btn-danger w-100">Abrir</a>
-            </div>
-        </div>
-    {% else %}
-        <div class="col-lg-8 mx-auto">
-            <div class="card dashboard-card text-center p-4">
-                <div class="card-icon green"><i class="fas fa-file-word"></i></div>
-                <h5 class="card-title">Planilla de Soporte</h5>
-                <p class="card-text">Generar órdenes de servicio técnico</p>
-                <a href="{{ url_for('planilla_soporte') }}" class="btn btn-success w-100">Abrir Planilla</a>
-            </div>
-        </div>
-    {% endif %}
+    </div>
 </div>
 {% endblock %}

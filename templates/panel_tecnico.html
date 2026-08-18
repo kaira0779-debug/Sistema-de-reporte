@@ -1,128 +1,47 @@
 {% extends "base.html" %}
-{% block title %}Panel del Técnico{% endblock %}
-{% block heading %}Mis Asignaciones{% endblock %}
+{% block title %}Mi Panel{% endblock %}
+{% block heading %}Mi Panel{% endblock %}
 
 {% block content %}
-<!-- Modal de notificación -->
-<div class="modal fade" id="notifModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered">
-    <div class="modal-content border-danger">
-      <div class="modal-header bg-danger text-white">
-        <h5 class="modal-title"><i class="fas fa-bell"></i> Nuevas asignaciones</h5>
-        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body text-center">
-        <p class="fs-5">Tienes <span id="cantidadNuevas" class="fw-bold">0</span> nueva(s) asignación(es) pendiente(s).</p>
-        <p>Por favor, revísalas y actualiza su estado.</p>
-      </div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
-        <button type="button" class="btn btn-primary" onclick="location.reload()">Actualizar lista</button>
-      </div>
-    </div>
-  </div>
-</div>
-
-<div class="card mb-4">
-    <div class="card-header d-flex justify-content-between align-items-center">
-        <span><i class="fas fa-clipboard-list me-2" style="color: var(--primary);"></i> Trabajos Asignados</span>
-        <span class="badge bg-danger fs-6" id="notifBadge" style="display:none;"></span>
-    </div>
-    <div class="card-body">
-        {% if asignaciones %}
-        <div class="table-responsive">
-            <table class="table table-hover align-middle">
-                <thead class="table-dark">
-                    <tr>
-                        <th>Fecha</th>
-                        <th>Tipo</th>
-                        <th>Descripción</th>
-                        <th>Prioridad</th>
-                        <th>Límite</th>
-                        <th>Ticket</th>
-                        <th>Cliente</th>
-                        <th>Estado</th>
-                        <th>Cambiar</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for a in asignaciones %}
-                    <tr class="{% if a.estado == 'Pendiente' %}table-warning{% elif a.estado == 'En proceso' %}table-info{% else %}table-success{% endif %}">
-                        <td>{{ a.fecha_asignacion.strftime('%d/%m/%Y %H:%M') }}</td>
-                        <td>{{ a.tipo_trabajo or '—' }}</td>
-                        <td>{{ a.descripcion }}</td>
-                        <td>
-                            {% if a.prioridad == 'Alta' %}
-                                <span class="badge bg-danger">Alta</span>
-                            {% elif a.prioridad == 'Media' %}
-                                <span class="badge bg-warning text-dark">Media</span>
-                            {% else %}
-                                <span class="badge bg-secondary">Baja</span>
-                            {% endif %}
-                        </td>
-                        <td>{{ a.fecha_limite.strftime('%d/%m/%Y') if a.fecha_limite else '—' }}</td>
-                        <td>{{ a.num_ticket or '—' }}</td>
-                        <td>{{ a.cliente or '—' }}</td>
-                        <td>
-                            <span class="badge {% if a.estado == 'Pendiente' %}bg-warning{% elif a.estado == 'En proceso' %}bg-info{% else %}bg-success{% endif %}">
-                                {{ a.estado }}
-                            </span>
-                        </td>
-                        <td>
-                            {% if a.estado != 'Completado' %}
-                            <form method="POST" action="{{ url_for('cambiar_estado_asignacion', id=a.id) }}" style="display:inline;">
-                                {% if a.estado == 'Pendiente' %}
-                                <input type="hidden" name="estado" value="En proceso">
-                                <button class="btn btn-sm btn-primary"><i class="fas fa-play"></i> Iniciar</button>
-                                {% elif a.estado == 'En proceso' %}
-                                <input type="hidden" name="estado" value="Completado">
-                                <button class="btn btn-sm btn-success"><i class="fas fa-check"></i> Completar</button>
-                                {% endif %}
-                            </form>
-                            {% endif %}
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header"><i class="fas fa-ticket-alt"></i> Tickets Asignados a Mí</div>
+            <div class="card-body">
+                {% if tickets %}
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle">
+                        <thead>
+                            <tr>
+                                <th>N° Ticket</th>
+                                <th>Fecha</th>
+                                <th>Cliente</th>
+                                <th>Motivo</th>
+                                <th>Status</th>
+                                <th>Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for t in tickets %}
+                            <tr>
+                                <td>{{ t.num_ticket }}</td>
+                                <td>{{ t.fecha.strftime('%d/%m/%Y') if t.fecha else '' }}</td>
+                                <td>{{ t.cliente }}</td>
+                                <td>{{ t.motivo_ticket }}</td>
+                                <td><span class="badge {% if t.status == 'Pendiente' %}badge-warning{% elif t.status == 'En proceso' %}badge-info{% elif t.status == 'Resuelto' %}badge-success{% else %}badge-danger{% endif %}">{{ t.status }}</span></td>
+                                <td>
+                                    <a href="/ticket/{{ t.id }}" class="btn btn-sm btn-outline-primary"><i class="fas fa-eye"></i></a>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <p class="text-muted">No tienes tickets asignados.</p>
+                {% endif %}
+            </div>
         </div>
-        {% else %}
-        <p class="text-muted">No tienes asignaciones pendientes.</p>
-        {% endif %}
     </div>
 </div>
-{% endblock %}
-
-{% block scripts %}
-<script>
-// Sonido de notificación (se descargará una sola vez)
-var audio = new Audio('{{ url_for("static", filename="sounds/notification.mp3") }}');
-var ultimasNuevas = 0;
-
-function checkNotifications() {
-    fetch('/api/tecnicos/notificaciones')
-        .then(r => r.json())
-        .then(data => {
-            var badge = document.getElementById('notifBadge');
-            if (data.nuevas > 0) {
-                badge.style.display = 'inline';
-                badge.textContent = data.nuevas + ' nueva(s)';
-                // Si hay más nuevas que antes, mostrar modal y sonido
-                if (data.nuevas > ultimasNuevas) {
-                    document.getElementById('cantidadNuevas').textContent = data.nuevas;
-                    var modal = new bootstrap.Modal(document.getElementById('notifModal'));
-                    modal.show();
-                    audio.play().catch(e => console.log('Sonido bloqueado'));
-                }
-            } else {
-                badge.style.display = 'none';
-            }
-            ultimasNuevas = data.nuevas;
-        });
-}
-
-// Verificar cada 30 segundos y al cargar
-setInterval(checkNotifications, 30000);
-window.onload = checkNotifications;
-</script>
 {% endblock %}

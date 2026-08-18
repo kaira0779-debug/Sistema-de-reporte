@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+{% block title %}Asignación de Trabajos{% endblock %}
+{% block heading %}Asignar Trabajos a Técnicos{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-lg-5">
+        <div class="card mb-4">
+            <div class="card-header">
+                <i class="fas fa-user-plus me-2" style="color: var(--primary);"></i> Nueva Asignación
+            </div>
+            <div class="card-body">
+                <form method="POST">
+                    <div class="mb-3">
+                        <label class="form-label">Técnico *</label>
+                        <select name="tecnico_id" class="form-select" required>
+                            <option value="">-- Seleccione --</option>
+                            {% for t in tecnicos %}
+                            <option value="{{ t.id }}">{{ t.nombre_completo }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Tipo de Trabajo</label>
+                        <select name="tipo_trabajo" class="form-select">
+                            <option value="">-- Seleccione --</option>
+                            <option value="Instalación">Instalación</option>
+                            <option value="Reparación">Reparación</option>
+                            <option value="Mantenimiento">Mantenimiento</option>
+                            <option value="Inspección">Inspección</option>
+                            <option value="Reubicación">Reubicación</option>
+                            <option value="Cambio de equipo">Cambio de equipo</option>
+                            <option value="Otro">Otro</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Zona</label>
+                        <select name="zona" class="form-select">
+                            <option value="">-- Seleccione --</option>
+                            {% for n in nodos %}
+                            <option value="{{ n }}">{{ n }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Prioridad</label>
+                        <select name="prioridad" class="form-select">
+                            <option value="Media" selected>Media</option>
+                            <option value="Alta">Alta</option>
+                            <option value="Baja">Baja</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Fecha límite</label>
+                        <input type="date" name="fecha_limite" class="form-control">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Descripción del trabajo *</label>
+                        <textarea name="descripcion" class="form-control" rows="3" required></textarea>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Ticket relacionado (opcional)</label>
+                        <input type="text" id="buscarTicket" class="form-control" placeholder="Buscar por número de ticket o cliente...">
+                        <input type="hidden" name="ticket_id" id="ticket_id">
+                        <div id="resultadoTicket" class="list-group mt-1" style="display:none;"></div>
+                    </div>
+                    <button type="submit" class="btn btn-amarillo"><i class="fas fa-paper-plane"></i> Asignar</button>
+                </form>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-7">
+        <div class="card">
+            <div class="card-header">
+                <i class="fas fa-list-alt me-2" style="color: var(--primary);"></i> Historial de Asignaciones
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>Fecha</th>
+                                <th>Técnico</th>
+                                <th>Tipo</th>
+                                <th>Zona</th>
+                                <th>Descripción</th>
+                                <th>Prioridad</th>
+                                <th>Límite</th>
+                                <th>Ticket</th>
+                                <th>Estado</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for a in asignaciones %}
+                            <tr>
+                                <td>{{ a.fecha_asignacion.strftime('%d/%m/%Y %H:%M') }}</td>
+                                <td>{{ a.tecnico_nombre }}</td>
+                                <td>{{ a.tipo_trabajo or '—' }}</td>
+                                <td>{{ a.zona or '—' }}</td>
+                                <td>{{ a.descripcion }}</td>
+                                <td>
+                                    {% if a.prioridad == 'Alta' %}
+                                        <span class="badge bg-danger">Alta</span>
+                                    {% elif a.prioridad == 'Media' %}
+                                        <span class="badge bg-warning text-dark">Media</span>
+                                    {% else %}
+                                        <span class="badge bg-secondary">Baja</span>
+                                    {% endif %}
+                                </td>
+                                <td>{{ a.fecha_limite.strftime('%d/%m/%Y') if a.fecha_limite else '—' }}</td>
+                                <td>{{ a.num_ticket or '—' }}</td>
+                                <td><span class="badge bg-info">{{ a.estado }}</span></td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+$('#buscarTicket').on('keyup', function() {
+    var q = $(this).val().trim();
+    if (q.length < 2) {
+        $('#resultadoTicket').hide().empty();
+        return;
+    }
+    $.getJSON('/api/buscar_tickets_json', { q: q }, function(data) {
+        var html = '';
+        data.forEach(function(t) {
+            html += '<a href="#" class="list-group-item list-group-item-action" data-id="' + t.id + '">';
+            html += '<strong>' + t.num_ticket + '</strong> - ' + t.cliente + ' (' + t.motivo_ticket + ')';
+            html += '</a>';
+        });
+        if (html) {
+            $('#resultadoTicket').html(html).show();
+        } else {
+            $('#resultadoTicket').hide().empty();
+        }
+    });
+});
+
+$(document).on('click', '#resultadoTicket a', function(e) {
+    e.preventDefault();
+    var id = $(this).data('id');
+    var texto = $(this).text();
+    $('#ticket_id').val(id);
+    $('#buscarTicket').val(texto);
+    $('#resultadoTicket').hide();
+});
+</script>
+{% endblock %}

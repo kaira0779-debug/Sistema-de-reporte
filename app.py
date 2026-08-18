@@ -24,6 +24,7 @@ from io import BytesIO
 import difflib
 import tempfile
 import chardet
+import unicodedata
 
 app = Flask(__name__)
 app.config.from_object(Config)
@@ -38,7 +39,6 @@ cache = {
     'nodos': {'data': None, 'timestamp': 0},
     'motivos': {'data': None, 'timestamp': 0},
     'tipos_falla': {'data': None, 'timestamp': 0},
-    'asignadores': {'data': None, 'timestamp': 0},
     'tecnicos': {'data': None, 'timestamp': 0},
 }
 
@@ -63,6 +63,7 @@ def get_db():
     if 'db' not in g:
         g.db = pymysql.connect(
             host=app.config['MYSQL_HOST'],
+            port=app.config['MYSQL_PORT'],
             user=app.config['MYSQL_USER'],
             password=app.config['MYSQL_PASSWORD'],
             database=app.config['MYSQL_DB'],
@@ -105,20 +106,52 @@ def update_online():
     if current_user.is_authenticated:
         conn = get_db()
         cur = conn.cursor()
-        cur.execute("UPDATE trabajadores SET online = 1 WHERE id = %s", (current_user.id,))
+        cur.execute("UPDATE trabajadores SET online = 1, ultima_actividad = NOW() WHERE id = %s", (current_user.id,))
         conn.commit()
         cur.close()
 
 @app.context_processor
 def inject_user():
-    return dict(current_user=current_user)
+    return dict(current_user=current_user, now=datetime.now)
 
 # ============================================================
-#   CREAR ADMIN SI NO EXISTE
+#   CREAR ADMIN Y COLUMNAS SI NO EXISTEN
 # ============================================================
 def crear_admin_si_no_existe():
     conn = get_db()
     cur = conn.cursor()
+
+    columnas_requeridas_trab = {
+        'telefono': "ALTER TABLE trabajadores ADD COLUMN telefono VARCHAR(20) NULL AFTER cedula",
+        'ultima_actividad': "ALTER TABLE trabajadores ADD COLUMN ultima_actividad DATETIME NULL AFTER online"
+    }
+    for col, ddl in columnas_requeridas_trab.items():
+        cur.execute(f"SHOW COLUMNS FROM trabajadores LIKE '{col}'")
+        if not cur.fetchone():
+            cur.execute(ddl)
+            conn.commit()
+
+    columnas_requeridas_clientes = {
+        'nodo': "ALTER TABLE clientes ADD COLUMN nodo VARCHAR(100) NULL AFTER direccion_servicio",
+        'mbps_contratados': "ALTER TABLE clientes ADD COLUMN mbps_contratados VARCHAR(50) NULL AFTER nodo"
+    }
+    for col, ddl in columnas_requeridas_clientes.items():
+        cur.execute(f"SHOW COLUMNS FROM clientes LIKE '{col}'")
+        if not cur.fetchone():
+            try:
+                cur.execute(ddl)
+                conn.commit()
+            except Exception as e:
+                print(f"No se pudo agregar columna {col} a clientes: {e}")
+
+    cur.execute("SHOW COLUMNS FROM tickets LIKE 'tecnico_id'")
+    if not cur.fetchone():
+        try:
+            cur.execute("ALTER TABLE tickets ADD COLUMN tecnico_id INT NULL AFTER responsable")
+            conn.commit()
+        except Exception as e:
+            print(f"No se pudo agregar columna tecnico_id a tickets: {e}")
+
     cur.execute("SELECT id FROM trabajadores WHERE username = 'admin'")
     if not cur.fetchone():
         hashed = bcrypt.hashpw(b'Admin123*', bcrypt.gensalt()).decode('utf-8')
@@ -140,18 +173,60 @@ def generar_numero_ticket():
     conn = get_db()
     cur = conn.cursor()
     year = datetime.now().strftime('%Y')
-    cur.execute("SELECT num_ticket FROM tickets WHERE num_ticket LIKE %s ORDER BY num_ticket DESC LIMIT 1", (f'{year}-%',))
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS ticket_sequences (
+            year INT PRIMARY KEY,
+            next_num INT NOT NULL DEFAULT 5000
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """)
+    conn.commit()
+    cur.execute("""
+        INSERT INTO ticket_sequences (year, next_num) VALUES (%s, 5000)
+        ON DUPLICATE KEY UPDATE next_num = LAST_INSERT_ID(next_num + 1)
+    """, (int(year),))
+    conn.commit()
+    cur.execute("SELECT LAST_INSERT_ID() as next_val")
     row = cur.fetchone()
+    next_num = row['next_val'] if row else 5000
     cur.close()
-    if row:
-        try:
-            num_str = row['num_ticket'].split('-')[1]
-            next_num = int(num_str) + 1
-        except (ValueError, IndexError):
-            next_num = 5000
-    else:
-        next_num = 5000
     return f"{year}-{next_num}"
+
+# ============================================================
+#   GENERAR NÚMERO CORRELATIVO
+# ============================================================
+def generar_numero_correlativo(tipo):
+    conn = get_db()
+    cur = conn.cursor()
+    anio = datetime.now().year
+
+    cur.execute("SHOW COLUMNS FROM correlativos LIKE 'año'")
+    tiene_columna_tilde = cur.fetchone() is not None
+
+    if tiene_columna_tilde:
+        cur.execute("DROP TABLE IF EXISTS correlativos")
+        conn.commit()
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS correlativos (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            tipo VARCHAR(20) NOT NULL,
+            anio INT NOT NULL DEFAULT 0,
+            ultimo_numero INT NOT NULL DEFAULT 0,
+            UNIQUE KEY unique_tipo_anio (tipo, anio)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """)
+    conn.commit()
+
+    cur.execute("""
+        INSERT INTO correlativos (tipo, anio, ultimo_numero) VALUES (%s, %s, 0)
+        ON DUPLICATE KEY UPDATE ultimo_numero = LAST_INSERT_ID(ultimo_numero + 1)
+    """, (tipo, anio))
+    conn.commit()
+    cur.execute("SELECT LAST_INSERT_ID() as next_val")
+    row = cur.fetchone()
+    nuevo = row['next_val'] if row else 1
+    cur.close()
+    return nuevo
 
 # ============================================================
 #   FUNCIONES DE CLIENTES
@@ -160,53 +235,76 @@ def guardar_cliente(datos):
     conn = get_db()
     cur = conn.cursor()
     n_contrato = datos.get('n_contrato', '').strip()
+    n_documento = datos.get('n_documento', '').strip()
+    nombre = datos.get('nombre_apellido', '').strip()
+
     if not n_contrato:
-        cur.execute("""
-            INSERT INTO clientes (n_contrato, n_documento, nombre_apellido, telefono, direccion_servicio, nodo, mbps_contratados, estatus_usuario, asignador)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
-        """, ('', datos.get('n_documento','').strip(), datos.get('nombre_apellido','').strip(),
-              datos.get('telefono','').strip(), datos.get('direccion_servicio','').strip(),
-              datos.get('nodo','').strip(), datos.get('mbps_contratados','').strip(),
-              datos.get('estatus_usuario','').strip(), datos.get('asignador','').strip()))
-        conn.commit()
-        cur.close()
-        invalidar_cache()
-        return 'inserted'
-    else:
-        cur.execute("SELECT id FROM clientes WHERE n_contrato = %s", (n_contrato,))
-        cliente = cur.fetchone()
+        if n_documento and nombre:
+            cur.execute("SELECT id FROM clientes WHERE n_documento = %s AND nombre_apellido = %s LIMIT 1", (n_documento, nombre))
+            cliente = cur.fetchone()
+        else:
+            cliente = None
+
         if cliente:
             cur.execute("""
                 UPDATE clientes SET n_documento=%s, nombre_apellido=%s, telefono=%s, direccion_servicio=%s,
-                nodo=%s, mbps_contratados=%s, estatus_usuario=%s, asignador=%s
+                nodo=%s, mbps_contratados=%s, estatus_usuario=%s
                 WHERE id=%s
-            """, (datos.get('n_documento','').strip(), datos.get('nombre_apellido','').strip(),
+            """, (n_documento, nombre,
                   datos.get('telefono','').strip(), datos.get('direccion_servicio','').strip(),
                   datos.get('nodo','').strip(), datos.get('mbps_contratados','').strip(),
-                  datos.get('estatus_usuario','').strip(), datos.get('asignador','').strip(), cliente['id']))
+                  datos.get('estatus_usuario','').strip(), cliente['id']))
             conn.commit()
             cur.close()
             invalidar_cache()
             return 'updated'
         else:
             cur.execute("""
-                INSERT INTO clientes (n_contrato, n_documento, nombre_apellido, telefono, direccion_servicio, nodo, mbps_contratados, estatus_usuario, asignador)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
-            """, (n_contrato, datos.get('n_documento','').strip(), datos.get('nombre_apellido','').strip(),
+                INSERT INTO clientes (n_contrato, n_documento, nombre_apellido, telefono, direccion_servicio, nodo, mbps_contratados, estatus_usuario)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+            """, ('', n_documento, nombre,
                   datos.get('telefono','').strip(), datos.get('direccion_servicio','').strip(),
                   datos.get('nodo','').strip(), datos.get('mbps_contratados','').strip(),
-                  datos.get('estatus_usuario','').strip(), datos.get('asignador','').strip()))
+                  datos.get('estatus_usuario','').strip()))
+            conn.commit()
+            cur.close()
+            invalidar_cache()
+            return 'inserted'
+    else:
+        cur.execute("SELECT id FROM clientes WHERE n_contrato = %s", (n_contrato,))
+        cliente = cur.fetchone()
+        if cliente:
+            cur.execute("""
+                UPDATE clientes SET n_documento=%s, nombre_apellido=%s, telefono=%s, direccion_servicio=%s,
+                nodo=%s, mbps_contratados=%s, estatus_usuario=%s
+                WHERE id=%s
+            """, (n_documento, nombre,
+                  datos.get('telefono','').strip(), datos.get('direccion_servicio','').strip(),
+                  datos.get('nodo','').strip(), datos.get('mbps_contratados','').strip(),
+                  datos.get('estatus_usuario','').strip(), cliente['id']))
+            conn.commit()
+            cur.close()
+            invalidar_cache()
+            return 'updated'
+        else:
+            cur.execute("""
+                INSERT INTO clientes (n_contrato, n_documento, nombre_apellido, telefono, direccion_servicio, nodo, mbps_contratados, estatus_usuario)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+            """, (n_contrato, n_documento, nombre,
+                  datos.get('telefono','').strip(), datos.get('direccion_servicio','').strip(),
+                  datos.get('nodo','').strip(), datos.get('mbps_contratados','').strip(),
+                  datos.get('estatus_usuario','').strip()))
             conn.commit()
             cur.close()
             invalidar_cache()
             return 'inserted'
 
 # ============================================================
-#   LECTURA Y MAPEO DE ARCHIVOS (funciones auxiliares)
+#   LECTURA Y MAPEO DE ARCHIVOS
 # ============================================================
 CAMPOS_CLIENTES = [
     'n_contrato', 'n_documento', 'nombre_apellido', 'telefono',
-    'direccion_servicio', 'nodo', 'mbps_contratados', 'estatus_usuario', 'asignador'
+    'direccion_servicio', 'nodo', 'mbps_contratados', 'estatus_usuario'
 ]
 
 CAMPOS_TICKETS = [
@@ -215,18 +313,17 @@ CAMPOS_TICKETS = [
 ]
 
 SINONIMOS = {
-    'n_contrato': ['contrato', 'n° contrato', 'nro contrato', 'número contrato', 'contrato cliente', 'id contrato'],
-    'n_documento': ['documento', 'cédula', 'rif', 'cedula', 'n° documento', 'nro documento', 'identificación'],
-    'nombre_apellido': ['nombre', 'cliente', 'nombre cliente', 'nombre y apellido', 'razón social', 'empresa', 'persona'],
-    'telefono': ['teléfono', 'celular', 'movil', 'contacto', 'tel', 'phone'],
-    'direccion_servicio': ['dirección', 'direccion', 'servicio', 'direccion de servicio', 'ubicación', 'domicilio'],
+    'n_contrato': ['contrato', 'n° contrato', 'nro contrato', 'número contrato', 'contrato cliente', 'id contrato', 'n_contrato', 'contrato', 'nro. contrato', 'nº contrato'],
+    'n_documento': ['documento', 'cédula', 'rif', 'cedula', 'n° documento', 'nro documento', 'identificación', 'n_documento', 'documento', 'cedula', 'rif'],
+    'nombre_apellido': ['nombre', 'cliente', 'nombre cliente', 'nombre y apellido', 'razón social', 'empresa', 'persona', 'nombre_apellido', 'nombre', 'cliente'],
+    'telefono': ['teléfono', 'celular', 'movil', 'contacto', 'tel', 'phone', 'telefono', 'tel'],
+    'direccion_servicio': ['dirección', 'direccion', 'servicio', 'direccion de servicio', 'ubicación', 'domicilio', 'direccion_prestacion_servicio', 'dirección de servicio'],
     'nodo': ['zona', 'sector', 'nodo', 'torre', 'zona de cobertura'],
-    'mbps_contratados': ['mbps', 'velocidad', 'plan', 'mb', 'ancho de banda', 'contratado'],
-    'estatus_usuario': ['estatus', 'estado', 'condición', 'situación', 'status'],
-    'asignador': ['asignado por', 'vendedor', 'tecnico asignador', 'responsable instalación'],
+    'mbps_contratados': ['mbps', 'velocidad', 'plan', 'mb', 'ancho de banda', 'contratado', 'mbps', 'velocidad contratada'],
+    'estatus_usuario': ['estatus', 'estado', 'condición', 'situación', 'status', 'estatus'],
     'fecha': ['fecha', 'dia', 'date', 'fecha de ticket'],
-    'num_ticket': ['ticket', 'nº ticket', 'numero ticket', 'nro ticket', 'id ticket', 'número de ticket'],
-    'cliente': ['cliente', 'nombre cliente', 'usuario', 'afiliado', 'contratante'],
+    'num_ticket': ['ticket', 'nº ticket', 'numero ticket', 'nro ticket', 'id ticket', 'número de ticket', 'num_ticket', 'nş de ticket', 'n° ticket', 'nro. ticket', 'n de ticket'],
+    'cliente': ['cliente', 'nombre cliente', 'usuario', 'afiliado', 'contratante', 'nombre'],
     'motivo_ticket': ['motivo', 'razón', 'descripción', 'falla reportada', 'problema', 'motivo de ticket'],
     'visita_tecnica': ['visita', 'técnico', 'visita tecnica', 'requiere visita', 'desplazamiento'],
     'tipo_falla': ['falla', 'tipo falla', 'problema', 'categoría', 'clasificación'],
@@ -236,28 +333,53 @@ SINONIMOS = {
     'observaciones': ['observación', 'notas', 'comentarios', 'detalles', 'adicional']
 }
 
+def normalizar_texto(texto):
+    texto = texto.lower()
+    texto = unicodedata.normalize('NFKD', texto).encode('ASCII', 'ignore').decode('ASCII')
+    texto = re.sub(r'[^a-z0-9 ]', ' ', texto)
+    texto = re.sub(r'\s+', ' ', texto).strip()
+    return texto
+
 def detectar_delimitador(archivo):
-    with open(archivo, 'r', encoding='utf-8-sig') as f:
-        sample = f.read(1024)
-        f.seek(0)
+    with open(archivo, 'rb') as f:
+        raw = f.read(2048)
+        encoding = chardet.detect(raw)['encoding'] or 'utf-8-sig'
+    with open(archivo, 'r', encoding=encoding) as f:
+        sample = f.read(2048)
     delimitadores = [',', ';', '\t', '|']
+    first_line = sample.split('\n')[0] if '\n' in sample else sample
+    counts = {}
     for delim in delimitadores:
-        if delim in sample:
-            return delim
+        counts[delim] = first_line.count(delim)
+    if ';' in first_line and counts.get(';', 0) > counts.get(',', 0):
+        return ';'
+    if counts.get(',', 0) > 0:
+        return ','
+    if '\t' in first_line:
+        return '\t'
+    total_counts = {}
+    for delim in delimitadores:
+        total_counts[delim] = sample.count(delim)
+    if total_counts:
+        return max(total_counts, key=total_counts.get)
     return ','
 
 def leer_archivo_datos(filepath, extension):
     if extension in ['.xlsx', '.xls']:
         wb = openpyxl.load_workbook(filepath, data_only=True)
-        hoja = wb.active
-        filas = list(hoja.iter_rows(values_only=True))
-        return [[str(cell).strip() if cell is not None else '' for cell in row] for row in filas if any(cell for cell in row)]
+        try:
+            hoja = wb.active
+            filas = list(hoja.iter_rows(values_only=True))
+            datos = [[str(cell).strip() if cell is not None else '' for cell in row] for row in filas if any(cell for cell in row)]
+            return datos
+        finally:
+            wb.close()
     else:
         with open(filepath, 'rb') as f:
             raw = f.read(10000)
             encoding = chardet.detect(raw)['encoding'] or 'utf-8-sig'
         with open(filepath, 'r', encoding=encoding) as f:
-            sample = f.read(1024)
+            sample = f.read(2048)
             f.seek(0)
             delim = detectar_delimitador(filepath)
             reader = csv.reader(f, delimiter=delim)
@@ -276,26 +398,30 @@ def leer_archivo_datos(filepath, extension):
 def mapear_columnas(filas, campos_esperados, sinonimos):
     if not filas:
         return None, None
-    header = [str(c).strip().lower() for c in filas[0]]
-    header = [re.sub(r'[^\w\s]', '', h) for h in header]
+    header = [str(c).strip() for c in filas[0]]
+    header_norm = [normalizar_texto(h) for h in header]
     mapeo = {}
     usado = set()
     for campo in campos_esperados:
         sinonimos_campo = sinonimos.get(campo, [])
         candidatos = [campo] + sinonimos_campo
+        candidatos_norm = [normalizar_texto(c) for c in candidatos]
         mejor_idx = None
         mejor_score = 0
-        for idx, col in enumerate(header):
+        for idx, col_norm in enumerate(header_norm):
             if idx in usado:
                 continue
-            for cand in candidatos:
-                score = difflib.SequenceMatcher(None, col, cand).ratio()
-                if cand in col or col in cand:
-                    score += 0.3
+            for cand in candidatos_norm:
+                if col_norm == cand:
+                    score = 1.0
+                else:
+                    score = difflib.SequenceMatcher(None, col_norm, cand).ratio()
+                if cand in col_norm:
+                    score += 0.2
                 if score > mejor_score:
                     mejor_score = score
                     mejor_idx = idx
-        if mejor_idx is not None and mejor_score >= 0.5:
+        if mejor_idx is not None and mejor_score >= 0.6:
             mapeo[campo] = mejor_idx
             usado.add(mejor_idx)
     campos_clientes_mapped = sum(1 for c in CAMPOS_CLIENTES if c in mapeo)
@@ -313,6 +439,8 @@ def convertir_fecha(valor):
         return valor.strftime('%Y-%m-%d')
     if isinstance(valor, str):
         valor = valor.strip()
+        if ' ' in valor:
+            valor = valor.split(' ')[0]
         formatos = [
             '%d/%m/%Y', '%d-%m-%Y', '%Y-%m-%d', '%m/%d/%Y',
             '%d.%m.%Y', '%Y/%m/%d', '%b %d %Y', '%d %b %Y'
@@ -337,39 +465,12 @@ def procesar_fila_datos(fila, mapeo, tipo):
             val = convertir_fecha(val)
         elif campo in ['n_contrato', 'n_documento', 'telefono', 'mbps_contratados']:
             if isinstance(val, str):
-                val = re.sub(r'[^\w\-\.]', '', val)
+                val = re.sub(r'[^\w\-\.\+]', '', val)
         datos[campo] = val
     return datos
 
-def buscar_cliente_flexible(nombre_busqueda, conn):
-    if not nombre_busqueda:
-        return None
-    nombre_normalizado = ' '.join(nombre_busqueda.split()).upper()
-    cur = conn.cursor()
-    cur.execute("SELECT * FROM clientes WHERE UPPER(REPLACE(nombre_apellido, '  ', ' ')) = %s", (nombre_normalizado,))
-    cliente = cur.fetchone()
-    if cliente:
-        cur.close()
-        return cliente
-    cur.execute("SELECT * FROM clientes WHERE UPPER(nombre_apellido) LIKE %s", (f'%{nombre_normalizado}%',))
-    cliente = cur.fetchone()
-    if cliente:
-        cur.close()
-        return cliente
-    palabras = nombre_normalizado.split()
-    if len(palabras) > 1:
-        condiciones = ' AND '.join(['UPPER(nombre_apellido) LIKE %s'] * len(palabras))
-        params = [f'%{p}%' for p in palabras]
-        cur.execute(f"SELECT * FROM clientes WHERE {condiciones}", params)
-        cliente = cur.fetchone()
-        if cliente:
-            cur.close()
-            return cliente
-    cur.close()
-    return None
-
 # ============================================================
-#                           RUTAS PRINCIPALES
+#                           RUTAS
 # ============================================================
 @app.route('/')
 def index():
@@ -411,7 +512,7 @@ def login():
 def logout():
     conn = get_db()
     cur = conn.cursor()
-    cur.execute("UPDATE trabajadores SET online = 0 WHERE id = %s", (current_user.id,))
+    cur.execute("UPDATE trabajadores SET online = 0, ultima_actividad = NULL WHERE id = %s", (current_user.id,))
     conn.commit()
     cur.close()
     logout_user()
@@ -422,7 +523,16 @@ def logout():
 def dashboard():
     if current_user.rol != 'admin':
         return redirect(url_for('panel_tecnico'))
-    return render_template('dashboard.html')
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) as total FROM trabajadores WHERE rol = 'tecnico'")
+    total_tecnicos = cur.fetchone()['total']
+    cur.execute("SELECT COUNT(*) as total FROM clientes")
+    total_clientes = cur.fetchone()['total']
+    cur.execute("SELECT COUNT(*) as total FROM tickets")
+    total_tickets = cur.fetchone()['total']
+    cur.close()
+    return render_template('dashboard.html', total_tecnicos=total_tecnicos, total_clientes=total_clientes, total_tickets=total_tickets)
 
 # ============================================================
 #   PANEL DEL TÉCNICO
@@ -436,27 +546,15 @@ def panel_tecnico():
     conn = get_db()
     cur = conn.cursor()
     cur.execute("""
-        SELECT a.*, t.num_ticket, t.cliente 
-        FROM asignaciones a 
-        LEFT JOIN tickets t ON a.ticket_id = t.id 
-        WHERE a.tecnico_id = %s 
-        ORDER BY a.fecha_asignacion DESC
+        SELECT t.*, tec.nombre_completo as tecnico_nombre
+        FROM tickets t
+        LEFT JOIN trabajadores tec ON t.tecnico_id = tec.id
+        WHERE t.tecnico_id = %s
+        ORDER BY t.fecha DESC, t.num_ticket DESC
     """, (current_user.id,))
-    asignaciones = cur.fetchall()
+    tickets = cur.fetchall()
     cur.close()
-    return render_template('panel_tecnico.html', asignaciones=asignaciones)
-
-@app.route('/api/tecnicos/notificaciones')
-@login_required
-def api_notificaciones_tecnico():
-    if current_user.rol != 'tecnico':
-        return jsonify({'error': 'Acceso denegado'}), 403
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute("SELECT COUNT(*) as nuevas FROM asignaciones WHERE tecnico_id = %s AND estado = 'Pendiente'", (current_user.id,))
-    row = cur.fetchone()
-    cur.close()
-    return jsonify({'nuevas': row['nuevas']})
+    return render_template('panel_tecnico.html', tickets=tickets)
 
 # ---------- CLIENTES ----------
 @app.route('/clientes')
@@ -490,7 +588,10 @@ def preview_import():
     temp.close()
     try:
         filas = leer_archivo_datos(temp.name, ext)
-        os.unlink(temp.name)
+        try:
+            os.unlink(temp.name)
+        except Exception:
+            pass
         if not filas:
             return jsonify({'error': 'El archivo está vacío'}), 400
         mapeo, tipo = mapear_columnas(filas, CAMPOS_CLIENTES + CAMPOS_TICKETS, SINONIMOS)
@@ -507,6 +608,10 @@ def preview_import():
             'total_filas': len(filas) - 1
         })
     except Exception as e:
+        try:
+            os.unlink(temp.name)
+        except Exception:
+            pass
         return jsonify({'error': str(e)}), 500
 
 @app.route('/cargar_clientes', methods=['GET', 'POST'])
@@ -529,7 +634,10 @@ def cargar_clientes():
         temp.close()
         try:
             filas = leer_archivo_datos(temp.name, ext)
-            os.unlink(temp.name)
+            try:
+                os.unlink(temp.name)
+            except Exception as e:
+                print(f"Advertencia: no se pudo eliminar {temp.name}: {e}")
             if not filas:
                 flash('El archivo está vacío', 'danger')
                 return redirect(url_for('clientes'))
@@ -559,6 +667,10 @@ def cargar_clientes():
             cur.close()
             flash(f'Clientes importados: {insertados} nuevos, {actualizados} actualizados, {errores} errores.', 'success')
         except Exception as e:
+            try:
+                os.unlink(temp.name)
+            except Exception:
+                pass
             flash(f'Error al procesar el archivo: {str(e)}', 'danger')
         return redirect(url_for('clientes'))
     return redirect(url_for('clientes'))
@@ -577,8 +689,7 @@ def agregar_cliente():
         'direccion_servicio': request.form.get('direccion_servicio', '').strip(),
         'nodo': request.form.get('nodo', '').strip(),
         'mbps_contratados': request.form.get('mbps_contratados', '').strip(),
-        'estatus_usuario': request.form.get('estatus_usuario', '').strip(),
-        'asignador': request.form.get('asignador', '').strip()
+        'estatus_usuario': request.form.get('estatus_usuario', '').strip()
     }
     if not datos['nombre_apellido']:
         flash('El nombre del cliente es obligatorio', 'danger')
@@ -611,15 +722,14 @@ def editar_cliente(cliente_id):
         nodo = request.form.get('nodo', '').strip()
         mbps_contratados = request.form.get('mbps_contratados', '').strip()
         estatus_usuario = request.form.get('estatus_usuario', '').strip()
-        asignador = request.form.get('asignador', '').strip()
         if not nombre_apellido:
             flash('El nombre del cliente es obligatorio', 'danger')
             return render_template('editar_cliente.html', cliente=cliente)
         cur.execute("""
             UPDATE clientes SET n_contrato=%s, n_documento=%s, nombre_apellido=%s, telefono=%s,
-            direccion_servicio=%s, nodo=%s, mbps_contratados=%s, estatus_usuario=%s, asignador=%s
+            direccion_servicio=%s, nodo=%s, mbps_contratados=%s, estatus_usuario=%s
             WHERE id=%s
-        """, (n_contrato, n_documento, nombre_apellido, telefono, direccion_servicio, nodo, mbps_contratados, estatus_usuario, asignador, cliente_id))
+        """, (n_contrato, n_documento, nombre_apellido, telefono, direccion_servicio, nodo, mbps_contratados, estatus_usuario, cliente_id))
         conn.commit()
         cur.close()
         invalidar_cache()
@@ -667,16 +777,27 @@ def detalle_cliente(cliente_id):
 def tickets():
     conn = get_db()
     cur = conn.cursor()
-    cur.execute("SELECT * FROM tickets ORDER BY fecha DESC, num_ticket DESC LIMIT 500")
+    cur.execute("""
+        SELECT t.*, tec.nombre_completo as tecnico_nombre
+        FROM tickets t
+        LEFT JOIN trabajadores tec ON t.tecnico_id = tec.id
+        ORDER BY t.fecha DESC, t.num_ticket DESC
+        LIMIT 500
+    """)
     tickets = cur.fetchall()
+
     cur.execute("SELECT DISTINCT nodo FROM clientes WHERE nodo IS NOT NULL AND nodo != '' UNION SELECT DISTINCT nodo FROM tickets WHERE nodo IS NOT NULL AND nodo != '' ORDER BY nodo")
     nodos = [row['nodo'] for row in cur.fetchall()]
+
     cur.execute("SELECT DISTINCT motivo_ticket FROM tickets WHERE motivo_ticket IS NOT NULL AND motivo_ticket != '' ORDER BY motivo_ticket")
     motivos = [row['motivo_ticket'] for row in cur.fetchall()]
+
     cur.execute("SELECT DISTINCT tipo_falla FROM tickets WHERE tipo_falla IS NOT NULL AND tipo_falla != '' ORDER BY tipo_falla")
     tipos_falla = [row['tipo_falla'] for row in cur.fetchall()]
-    cur.execute("SELECT DISTINCT nombre_completo FROM trabajadores WHERE rol = 'tecnico' ORDER BY nombre_completo")
-    tecnicos = [row['nombre_completo'] for row in cur.fetchall()]
+
+    cur.execute("SELECT id, nombre_completo, cedula, telefono FROM trabajadores WHERE rol = 'tecnico' ORDER BY nombre_completo")
+    tecnicos = cur.fetchall()
+
     cur.close()
     return render_template('tickets.html', tickets=tickets, nodos=nodos, motivos=motivos, tipos_falla=tipos_falla, tecnicos=tecnicos)
 
@@ -687,15 +808,69 @@ def api_buscar_tickets():
     conn = get_db()
     cur = conn.cursor()
     if q:
-        cur.execute("""SELECT * FROM tickets WHERE num_ticket LIKE %s OR cliente LIKE %s OR nodo LIKE %s OR motivo_ticket LIKE %s OR tipo_falla LIKE %s OR status LIKE %s OR responsable LIKE %s OR observaciones LIKE %s ORDER BY fecha DESC, num_ticket DESC LIMIT 50""", (f'%{q}%',)*8)
+        like = f'%{q}%'
+        cur.execute("""
+            SELECT * FROM tickets 
+            WHERE num_ticket LIKE %s OR cliente LIKE %s OR nodo LIKE %s 
+               OR motivo_ticket LIKE %s OR tipo_falla LIKE %s OR status LIKE %s 
+               OR responsable LIKE %s OR observaciones LIKE %s
+            ORDER BY fecha DESC, num_ticket DESC 
+            LIMIT 50
+        """, (like, like, like, like, like, like, like, like))
     else:
         cur.execute("SELECT * FROM tickets ORDER BY fecha DESC, num_ticket DESC LIMIT 50")
     tickets = cur.fetchall()
     cur.close()
     for t in tickets:
-        if t['fecha']:
+        if t.get('fecha') and hasattr(t['fecha'], 'strftime'):
             t['fecha'] = t['fecha'].strftime('%Y-%m-%d')
     return jsonify(tickets)
+
+@app.route('/api/buscar_cliente_json')
+@login_required
+def api_buscar_cliente():
+    q = request.args.get('q', '').strip()
+    if not q:
+        return jsonify([])
+    conn = get_db()
+    cur = conn.cursor()
+    q_upper = q.upper().strip()
+    like = f'%{q_upper}%'
+    cur.execute("""
+        SELECT id, n_contrato, nombre_apellido, telefono, nodo, n_documento, direccion_servicio, mbps_contratados, estatus_usuario
+        FROM clientes
+        WHERE UPPER(n_contrato) LIKE %s 
+           OR UPPER(nombre_apellido) LIKE %s 
+           OR UPPER(n_documento) LIKE %s 
+           OR UPPER(telefono) LIKE %s 
+           OR UPPER(nodo) LIKE %s
+           OR UPPER(direccion_servicio) LIKE %s
+        ORDER BY 
+            CASE 
+                WHEN UPPER(nombre_apellido) = %s THEN 1
+                WHEN UPPER(nombre_apellido) LIKE %s THEN 2
+                WHEN UPPER(n_contrato) = %s THEN 3
+                WHEN UPPER(n_documento) = %s THEN 4
+                ELSE 5
+            END
+        LIMIT 20
+    """, (like, like, like, like, like, like,
+         q_upper, f'%{q_upper}%', q_upper, q_upper))
+    clientes = []
+    for c in cur.fetchall():
+        clientes.append({
+            'id': c['id'],
+            'nombre': c['nombre_apellido'],
+            'contrato': c['n_contrato'] or '',
+            'documento': c['n_documento'] or '',
+            'telefono': c['telefono'] or '',
+            'direccion': c['direccion_servicio'] or '',
+            'nodo': c['nodo'] or '',
+            'mbps': c['mbps_contratados'] or '',
+            'estatus': c['estatus_usuario'] or ''
+        })
+    cur.close()
+    return jsonify(clientes)
 
 @app.route('/cargar_tickets', methods=['POST'])
 @login_required
@@ -713,7 +888,10 @@ def cargar_tickets():
     temp.close()
     try:
         filas = leer_archivo_datos(temp.name, ext)
-        os.unlink(temp.name)
+        try:
+            os.unlink(temp.name)
+        except Exception as e:
+            print(f"Advertencia: no se pudo eliminar {temp.name}: {e}")
         if not filas:
             flash('El archivo está vacío', 'danger')
             return redirect(url_for('tickets'))
@@ -725,65 +903,105 @@ def cargar_tickets():
         cur = conn.cursor()
         insertados = 0
         errores = 0
-        for fila in filas[1:]:
+        for idx, fila in enumerate(filas[1:], start=2):
             if not any(fila):
                 continue
             datos = procesar_fila_datos(fila, mapeo, 'tickets')
             if not datos.get('cliente') or not datos.get('fecha'):
                 errores += 1
+                print(f"Fila {idx}: faltan cliente o fecha")
                 continue
-            num_ticket = str(datos.get('num_ticket', ''))
-            if num_ticket and datos['fecha']:
-                cur.execute("SELECT id FROM tickets WHERE num_ticket = %s AND fecha = %s", (num_ticket, datos['fecha']))
-                if cur.fetchone():
-                    errores += 1
-                    continue
-            if 'ap caida' in datos.get('tipo_falla', '').lower():
+            num_ticket = str(datos.get('num_ticket', '')).strip()
+            if not num_ticket:
+                errores += 1
+                print(f"Fila {idx}: num_ticket vacío")
+                continue
+            cur.execute("SELECT id FROM tickets WHERE num_ticket = %s AND fecha = %s", (num_ticket, datos['fecha']))
+            if cur.fetchone():
+                errores += 1
+                print(f"Fila {idx}: duplicado de {num_ticket} en {datos['fecha']}")
+                continue
+            if datos.get('tipo_falla') and 'ap caida' in datos['tipo_falla'].lower():
                 datos['tipo_falla'] = 'AP caída'
-            cur.execute("""INSERT INTO tickets (fecha, num_ticket, nodo, cliente, motivo_ticket, visita_tecnica, tipo_falla, departamento, status, responsable, observaciones) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-                (datos.get('fecha'), num_ticket, datos.get('nodo', ''), datos.get('cliente'), datos.get('motivo_ticket', ''),
-                 datos.get('visita_tecnica', ''), datos.get('tipo_falla', ''), datos.get('departamento', ''),
-                 datos.get('status', 'Pendiente'), datos.get('responsable', ''), datos.get('observaciones', '')))
+            cur.execute("""
+                INSERT INTO tickets (fecha, num_ticket, nodo, cliente, motivo_ticket, visita_tecnica, 
+                                    tipo_falla, departamento, status, responsable, observaciones, tecnico_id)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NULL)
+            """, (datos.get('fecha'), num_ticket, datos.get('nodo', ''), datos.get('cliente'),
+                  datos.get('motivo_ticket', ''), datos.get('visita_tecnica', ''),
+                  datos.get('tipo_falla', ''), datos.get('departamento', ''),
+                  datos.get('status', 'Pendiente'), datos.get('responsable', ''),
+                  datos.get('observaciones', '')))
             insertados += 1
         conn.commit()
         cur.close()
         flash(f'{insertados} tickets importados correctamente, {errores} errores.', 'success')
     except Exception as e:
+        try:
+            os.unlink(temp.name)
+        except Exception:
+            pass
         flash(f'Error al procesar el archivo: {str(e)}', 'danger')
     return redirect(url_for('tickets'))
 
 @app.route('/agregar_ticket', methods=['POST'])
 @login_required
 def agregar_ticket():
-    nodo = request.form.get('nodo')
-    cliente_id = request.form.get('cliente_id')
-    motivo_ticket = request.form.get('motivo_ticket')
-    visita_tecnica = request.form.get('visita_tecnica')
-    tipo_falla = request.form.get('tipo_falla')
-    status = request.form.get('status')
-    responsable = request.form.get('responsable')
-    observaciones = request.form.get('observaciones')
-    if not cliente_id:
-        flash('El cliente es obligatorio', 'danger')
-        return redirect(url_for('tickets'))
+    nodo = request.form.get('nodo', '').strip()
+    cliente_id = request.form.get('cliente_id', '').strip()
+    motivo_ticket = request.form.get('motivo_ticket', '').strip()
+    visita_tecnica = request.form.get('visita_tecnica', '').strip()
+    tipo_falla = request.form.get('tipo_falla', '').strip()
+    status = request.form.get('status', 'Pendiente').strip()
+    responsable = request.form.get('responsable', '').strip()
+    tecnico_id = request.form.get('tecnico_id', '').strip()
+    observaciones = request.form.get('observaciones', '').strip()
+    cliente_nombre_busqueda = request.form.get('cliente_nombre_busqueda', '').strip()
+
     conn = get_db()
     cur = conn.cursor()
-    cur.execute("SELECT nombre_apellido FROM clientes WHERE id = %s", (cliente_id,))
+
+    if not cliente_id and cliente_nombre_busqueda:
+        cur.execute("SELECT id, nombre_apellido, nodo FROM clientes WHERE nombre_apellido = %s LIMIT 1", (cliente_nombre_busqueda,))
+        cliente = cur.fetchone()
+        if cliente:
+            cliente_id = cliente['id']
+            nodo = nodo or cliente['nodo']
+
+    if not cliente_id:
+        cur.close()
+        flash('Debe seleccionar un cliente de la lista', 'danger')
+        return redirect(url_for('tickets'))
+
+    cur.execute("SELECT * FROM clientes WHERE id = %s", (cliente_id,))
     cliente = cur.fetchone()
     if not cliente:
-        flash('Cliente no encontrado', 'danger')
         cur.close()
+        flash('Cliente no encontrado', 'danger')
         return redirect(url_for('tickets'))
+
+    if not nodo:
+        nodo = cliente.get('nodo', '')
+
     cliente_nombre = cliente['nombre_apellido']
     num_ticket = generar_numero_ticket()
     fecha = datetime.now().strftime('%Y-%m-%d')
     if re.search(r'ap\s*ca[ií]da', tipo_falla, re.IGNORECASE):
         tipo_falla = 'AP caída'
-    cur.execute("""INSERT INTO tickets (fecha, num_ticket, nodo, cliente, motivo_ticket, visita_tecnica, tipo_falla, departamento, status, responsable, observaciones) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""", (fecha, num_ticket, nodo, cliente_nombre, motivo_ticket, visita_tecnica, tipo_falla, '', status, responsable, observaciones))
+
+    tecnico_id = int(tecnico_id) if tecnico_id else None
+
+    cur.execute("""
+        INSERT INTO tickets (fecha, num_ticket, nodo, cliente, motivo_ticket, visita_tecnica, 
+                            tipo_falla, departamento, status, responsable, observaciones, tecnico_id)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+    """, (fecha, num_ticket, nodo, cliente_nombre, motivo_ticket, visita_tecnica, 
+          tipo_falla, '', status, responsable, observaciones, tecnico_id))
     conn.commit()
+    ticket_id = cur.lastrowid
     cur.close()
     flash(f'Ticket {num_ticket} agregado correctamente', 'success')
-    return redirect(url_for('tickets'))
+    return redirect(url_for('planilla_soporte', ticket_id=ticket_id))
 
 @app.route('/ticket/<int:ticket_id>/eliminar', methods=['POST'])
 @login_required
@@ -801,7 +1019,12 @@ def eliminar_ticket(ticket_id):
 def detalle_ticket(ticket_id):
     conn = get_db()
     cur = conn.cursor()
-    cur.execute("SELECT * FROM tickets WHERE id = %s", (ticket_id,))
+    cur.execute("""
+        SELECT t.*, tec.nombre_completo as tecnico_nombre, tec.cedula as tecnico_cedula, tec.telefono as tecnico_telefono
+        FROM tickets t
+        LEFT JOIN trabajadores tec ON t.tecnico_id = tec.id
+        WHERE t.id = %s
+    """, (ticket_id,))
     ticket = cur.fetchone()
     cur.close()
     if not ticket:
@@ -820,6 +1043,7 @@ def editar_ticket(ticket_id):
         flash('Ticket no encontrado', 'danger')
         cur.close()
         return redirect(url_for('tickets'))
+
     if request.method == 'POST':
         nodo = request.form.get('nodo', '').strip()
         motivo_ticket = request.form.get('motivo_ticket', '').strip()
@@ -828,14 +1052,24 @@ def editar_ticket(ticket_id):
         departamento = request.form.get('departamento', '').strip()
         status = request.form.get('status', '').strip()
         responsable = request.form.get('responsable', '').strip()
+        tecnico_id = request.form.get('tecnico_id', '').strip()
         observaciones = request.form.get('observaciones', '').strip()
+
         if re.search(r'ap\s*ca[ií]da', tipo_falla, re.IGNORECASE):
             tipo_falla = 'AP caída'
-        cur.execute("""UPDATE tickets SET nodo=%s, motivo_ticket=%s, visita_tecnica=%s, tipo_falla=%s, departamento=%s, status=%s, responsable=%s, observaciones=%s WHERE id=%s""", (nodo, motivo_ticket, visita_tecnica, tipo_falla, departamento, status, responsable, observaciones, ticket_id))
+        tecnico_id = int(tecnico_id) if tecnico_id else None
+
+        cur.execute("""
+            UPDATE tickets SET nodo=%s, motivo_ticket=%s, visita_tecnica=%s, tipo_falla=%s,
+            departamento=%s, status=%s, responsable=%s, tecnico_id=%s, observaciones=%s
+            WHERE id=%s
+        """, (nodo, motivo_ticket, visita_tecnica, tipo_falla, departamento, status,
+              responsable, tecnico_id, observaciones, ticket_id))
         conn.commit()
         cur.close()
         flash('Ticket actualizado correctamente', 'success')
         return redirect(url_for('detalle_ticket', ticket_id=ticket_id))
+
     cur.execute("SELECT DISTINCT nodo FROM clientes WHERE nodo IS NOT NULL AND nodo != '' UNION SELECT DISTINCT nodo FROM tickets WHERE nodo IS NOT NULL AND nodo != '' ORDER BY nodo")
     nodos = [row['nodo'] for row in cur.fetchall()]
     cur.execute("SELECT DISTINCT motivo_ticket FROM tickets WHERE motivo_ticket IS NOT NULL AND motivo_ticket != '' ORDER BY motivo_ticket")
@@ -844,10 +1078,37 @@ def editar_ticket(ticket_id):
     tipos_falla = [row['tipo_falla'] for row in cur.fetchall()]
     cur.execute("SELECT DISTINCT status FROM tickets WHERE status IS NOT NULL AND status != '' ORDER BY status")
     estados = [row['status'] for row in cur.fetchall()]
-    cur.execute("SELECT DISTINCT nombre_completo FROM trabajadores WHERE rol = 'tecnico' ORDER BY nombre_completo")
-    tecnicos = [row['nombre_completo'] for row in cur.fetchall()]
+    cur.execute("SELECT id, nombre_completo FROM trabajadores WHERE rol = 'tecnico' ORDER BY nombre_completo")
+    tecnicos = cur.fetchall()
     cur.close()
-    return render_template('editar_ticket.html', ticket=ticket, nodos=nodos, motivos=motivos, tipos_falla=tipos_falla, estados=estados, tecnicos=tecnicos)
+    return render_template('editar_ticket.html', ticket=ticket, nodos=nodos, motivos=motivos,
+                           tipos_falla=tipos_falla, estados=estados, tecnicos=tecnicos)
+
+# ---------- API TICKET DETALLE ----------
+@app.route('/api/ticket/<int:ticket_id>')
+@login_required
+def api_ticket_detalle(ticket_id):
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM tickets WHERE id = %s", (ticket_id,))
+    ticket = cur.fetchone()
+    if not ticket:
+        cur.close()
+        return jsonify({'error': 'Ticket no encontrado'}), 404
+    cliente = None
+    tecnico = None
+    if ticket.get('cliente'):
+        cur.execute("SELECT * FROM clientes WHERE nombre_apellido = %s LIMIT 1", (ticket['cliente'],))
+        cliente = cur.fetchone()
+    if ticket.get('tecnico_id'):
+        cur.execute("SELECT id, username, nombre_completo, cedula, telefono FROM trabajadores WHERE id = %s AND rol = 'tecnico'", (ticket['tecnico_id'],))
+        tecnico = cur.fetchone()
+    cur.close()
+    if ticket.get('fecha') and hasattr(ticket['fecha'], 'strftime'):
+        ticket['fecha'] = ticket['fecha'].strftime('%Y-%m-%d')
+    if cliente and cliente.get('creado_en') and hasattr(cliente['creado_en'], 'strftime'):
+        cliente['creado_en'] = cliente['creado_en'].strftime('%Y-%m-%d %H:%M:%S')
+    return jsonify({'ticket': ticket, 'cliente': cliente, 'tecnico': tecnico})
 
 # ---------- ADMINISTRACIÓN ----------
 @app.route('/admin')
@@ -879,27 +1140,31 @@ def admin_tecnicos():
         username = request.form.get('username', '').strip()
         nombre_completo = request.form.get('nombre_completo', '').strip()
         cedula = request.form.get('cedula', '').strip()
-        password = request.form.get('password', '')
-        if not username or not password or not nombre_completo:
-            flash('Todos los campos son obligatorios', 'danger')
+        telefono = request.form.get('telefono', '').strip()
+        if not username or not nombre_completo:
+            flash('El usuario y nombre son obligatorios', 'danger')
             return redirect(url_for('admin_tecnicos'))
         try:
             cur.execute("SELECT id FROM trabajadores WHERE username = %s", (username,))
             if cur.fetchone():
                 flash('El nombre de usuario ya existe', 'danger')
                 return redirect(url_for('admin_tecnicos'))
-            hashed = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
-            cur.execute("INSERT INTO trabajadores (username, password_hash, nombre_completo, cedula, rol, online) VALUES (%s,%s,%s,%s,'tecnico',0)", (username, hashed, nombre_completo, cedula))
+            password_default = 'Tecnico123*'
+            hashed = bcrypt.hashpw(password_default.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+            cur.execute("""
+                INSERT INTO trabajadores (username, password_hash, nombre_completo, cedula, telefono, rol, online)
+                VALUES (%s,%s,%s,%s,%s,'tecnico',0)
+            """, (username, hashed, nombre_completo, cedula, telefono))
             conn.commit()
             nuevo_id = cur.lastrowid
-            flash(f'Técnico registrado exitosamente con ID {nuevo_id}', 'success')
+            flash(f'Técnico registrado exitosamente con ID {nuevo_id}. Contraseña temporal: {password_default}', 'success')
         except Exception as e:
             flash(f'Error: {str(e)}', 'danger')
         finally:
             cur.close()
         invalidar_cache()
         return redirect(url_for('admin_tecnicos'))
-    cur.execute("SELECT id, username, nombre_completo, cedula, rol, online FROM trabajadores WHERE rol = 'tecnico' ORDER BY creado_en DESC")
+    cur.execute("SELECT id, username, nombre_completo, cedula, telefono, rol, online, ultima_actividad FROM trabajadores WHERE rol = 'tecnico' ORDER BY creado_en DESC")
     tecnicos = cur.fetchall()
     cur.close()
     return render_template('admin_tecnicos.html', tecnicos=tecnicos)
@@ -923,7 +1188,7 @@ def eliminar_tecnico(id):
     return redirect(url_for('admin_tecnicos'))
 
 # ============================================================
-#   DUPLICADOS (EXACTOS)
+#   DUPLICADOS
 # ============================================================
 @app.route('/admin/duplicados')
 @login_required
@@ -991,65 +1256,6 @@ def eliminar_duplicados_auto():
     return redirect(url_for('admin_duplicados'))
 
 # ============================================================
-#   ASIGNACIÓN DE TRABAJOS
-# ============================================================
-@app.route('/admin/asignaciones', methods=['GET', 'POST'])
-@login_required
-def admin_asignaciones():
-    if current_user.rol != 'admin':
-        flash('Acceso denegado', 'danger')
-        return redirect(url_for('dashboard'))
-    conn = get_db()
-    cur = conn.cursor()
-    if request.method == 'POST':
-        tecnico_id = request.form.get('tecnico_id')
-        descripcion = request.form.get('descripcion')
-        ticket_id = request.form.get('ticket_id') or None
-        tipo_trabajo = request.form.get('tipo_trabajo', '').strip() or None
-        prioridad = request.form.get('prioridad', 'Media')
-        fecha_limite = request.form.get('fecha_limite') or None
-        zona = request.form.get('zona', '').strip() or None
-        if not tecnico_id or not descripcion:
-            flash('Todos los campos obligatorios deben completarse', 'danger')
-        else:
-            cur.execute("""
-                INSERT INTO asignaciones (tecnico_id, admin_id, descripcion, ticket_id, tipo_trabajo, prioridad, fecha_limite, zona)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
-            """, (tecnico_id, current_user.id, descripcion, ticket_id, tipo_trabajo, prioridad, fecha_limite, zona))
-            conn.commit()
-            flash('Asignación creada correctamente', 'success')
-        return redirect(url_for('admin_asignaciones'))
-    cur.execute("SELECT id, nombre_completo FROM trabajadores WHERE rol = 'tecnico' ORDER BY nombre_completo")
-    tecnicos = cur.fetchall()
-    cur.execute("SELECT DISTINCT nodo FROM clientes WHERE nodo IS NOT NULL AND nodo != '' ORDER BY nodo")
-    nodos = [row['nodo'] for row in cur.fetchall()]
-    cur.execute("""
-        SELECT a.*, t.nombre_completo as tecnico_nombre, tk.num_ticket, tk.cliente
-        FROM asignaciones a
-        JOIN trabajadores t ON a.tecnico_id = t.id
-        LEFT JOIN tickets tk ON a.ticket_id = tk.id
-        ORDER BY a.fecha_asignacion DESC
-    """)
-    asignaciones = cur.fetchall()
-    cur.close()
-    return render_template('admin_asignaciones.html', tecnicos=tecnicos, asignaciones=asignaciones, nodos=nodos)
-
-@app.route('/admin/asignacion/<int:id>/estado', methods=['POST'])
-@login_required
-def cambiar_estado_asignacion(id):
-    if current_user.rol not in ('admin', 'tecnico'):
-        flash('Acceso denegado', 'danger')
-        return redirect(url_for('dashboard'))
-    nuevo_estado = request.form.get('estado')
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute("UPDATE asignaciones SET estado=%s WHERE id=%s", (nuevo_estado, id))
-    conn.commit()
-    cur.close()
-    flash('Estado actualizado', 'success')
-    return redirect(request.referrer or url_for('panel_tecnico'))
-
-# ============================================================
 #   PLANILLA DE SOPORTE
 # ============================================================
 GENERADOS_FOLDER = os.path.join(app.static_folder, 'plantillas', 'generados')
@@ -1068,126 +1274,153 @@ TIPOS_FALLA = [
     "No aplica", "Otro"
 ]
 
-def generar_pdf_planilla(cliente, tecnico, motivo, tipo_falla, observaciones, num_ticket, hora_inicio, hora_fin):
+def generar_pdf_planilla(cliente, tecnico, motivo, tipo_falla, observaciones, num_ticket, hora_inicio, hora_fin,
+                         tipo_planilla='soporte', numero_correlativo=None):
     buffer = BytesIO()
     c = pdfcanvas.Canvas(buffer, pagesize=letter)
     width, height = letter
-    margin = 50
+    margin = 40
     x_left = margin
     x_right = width - margin
-    y_start = height - margin
+    y = height - margin
 
-    c.setFont("Helvetica-Bold", 16)
-    c.drawString(x_left, y_start, "DAITNVOZ C.A")
-    c.setFont("Helvetica", 9)
-    c.drawString(x_left, y_start - 18, "Avenida Principal de los Chorros, Qta Datinvoz, Caracas 1071, Distrito Capital, Venezuela")
-    c.drawString(x_left, y_start - 32, "Teléfono: 0424-1637944")
+    # --- Encabezado ---
     c.setFont("Helvetica-Bold", 13)
-    c.drawCentredString(width/2, y_start - 52, "ORDEN DE SERVICIO TECNICO - SOPORTE DE INTERNET")
+    c.drawCentredString(width/2, y, "DAITNVOZ C.A")
+    c.setFont("Helvetica", 8)
+    c.drawCentredString(width/2, y - 13, "Avenida Principal de los Chorros, Qta Datinvoz, Caracas 1071, Distrito Capital, Venezuela")
+    c.drawCentredString(width/2, y - 24, "Teléfono: 0424-1637944")
+    c.setFont("Helvetica-Bold", 10)
+    if tipo_planilla.lower() == 'soporte':
+        c.drawCentredString(width/2, y - 38, "ORDEN DE SERVICIO TECNICO - SOPORTE DE INTERNET")
+    else:
+        c.drawCentredString(width/2, y - 38, f"ORDEN DE SERVICIO TECNICO - {tipo_planilla.upper()}")
 
-    c.setFont("Helvetica", 9)
-    y_line = y_start - 72
-    c.drawString(x_left, y_line, f"N° Ticket: {num_ticket if num_ticket else '______________'}")
-    c.drawString(x_left + 180, y_line, f"Fecha: {datetime.now().strftime('%d/%m/%Y')}")
-    c.drawString(x_left + 340, y_line, f"Hora Inicio: {hora_inicio if hora_inicio else '________'}")
-    c.drawString(x_left + 500, y_line, f"Hora Fin: {hora_fin if hora_fin else '________'}")
+    # Número correlativo en esquina superior derecha
+    c.setFont("Helvetica", 8)
+    c.drawRightString(x_right, y - 12, f"N° Correlativo: {numero_correlativo if numero_correlativo else '________'}")
 
-    y = y_line - 25
-    c.setFont("Helvetica-Bold", 11)
+    # Línea separadora
+    c.setStrokeColor(colors.black)
+    c.line(x_left, y - 48, x_right, y - 48)
+
+    # Bloque de datos del ticket/fecha/hora
+    y = y - 62
+    c.setFont("Helvetica", 8)
+    if tipo_planilla.lower() == 'soporte':
+        c.drawString(x_left, y, f"N° Ticket: {num_ticket if num_ticket else '______________'}")
+        c.drawString(x_left + 200, y, f"Fecha: {datetime.now().strftime('%d/%m/%Y')}")
+        c.drawString(x_left + 350, y, f"Hora Inicio: {hora_inicio if hora_inicio else '________'}")
+        c.drawString(x_left + 500, y, f"Hora Fin: {hora_fin if hora_fin else '________'}")
+    else:
+        c.drawString(x_left, y, f"Fecha: {datetime.now().strftime('%d/%m/%Y')}")
+        c.drawString(x_left + 200, y, f"Hora Inicio: {hora_inicio if hora_inicio else '________'}")
+        c.drawString(x_left + 400, y, f"Hora Fin: {hora_fin if hora_fin else '________'}")
+
+    y -= 22
+    # --- Datos del cliente ---
+    c.setFont("Helvetica-Bold", 9)
     c.drawString(x_left, y, "DATOS DEL CLIENTE")
-    y -= 18
-    c.setFont("Helvetica", 10)
+    y -= 14
+    c.setFont("Helvetica", 8)
     nombre_cliente = cliente.get('nombre_apellido', '') if cliente.get('nombre_apellido') else '__________________________'
     direccion = cliente.get('direccion_servicio', '') if cliente.get('direccion_servicio') else '__________________________'
     telefono = cliente.get('telefono', '') if cliente.get('telefono') else '____________________'
     c.drawString(x_left, y, f"Nombre/Empresa: {nombre_cliente}")
-    y -= 16
+    y -= 12
     c.drawString(x_left, y, f"Dirección: {direccion}")
-    y -= 16
+    y -= 12
     c.drawString(x_left, y, f"Teléfono: {telefono}")
-    c.drawString(x_left + 230, y, f"Correo: ____________________")
 
-    y -= 25
-    c.setFont("Helvetica-Bold", 11)
+    # --- Descripción del servicio ---
+    y -= 24
+    c.setFont("Helvetica-Bold", 9)
     c.drawString(x_left, y, "DESCRIPCION DEL SERVICIO REALIZADO:")
-    y -= 16
-    c.setFont("Helvetica", 10)
+    y -= 12
+    c.setFont("Helvetica", 8)
     for i in range(4):
-        c.drawString(x_left, y - i*14, "_______________________________________________________________________________")
+        c.line(x_left, y - i*13, x_right, y - i*13)
     if observaciones:
         lines = observaciones.split('\n')
         for i, line in enumerate(lines[:4]):
-            c.setFillColor(colors.white)
-            c.rect(x_left+2, y - i*14 - 10, 500, 12, fill=1, stroke=0)
-            c.setFillColor(colors.black)
-            c.drawString(x_left+4, y - i*14, line[:70])
-    y -= 60
+            c.drawString(x_left + 4, y - i*13 - 3, line[:75])
 
-    c.setFont("Helvetica-Bold", 11)
+    # --- Materiales ---
+    y -= 62
+    c.setFont("Helvetica-Bold", 9)
     c.drawString(x_left, y, "MATERIALES ENTREGADOS / INSTALADOS")
-    y -= 16
-    c.setFont("Helvetica", 9)
+    y -= 12
+    c.setFont("Helvetica", 7)
     c.drawString(x_left, y, "Cant.")
     c.drawString(x_left + 50, y, "Descripción")
-    c.drawString(x_left + 220, y, "Serial/N° Lote")
-    c.drawString(x_left + 380, y, "Observaciones")
-    y -= 10
+    c.drawString(x_left + 200, y, "Serial/N° Lote")
+    c.drawString(x_left + 350, y, "Observaciones")
+    y -= 6
     c.line(x_left, y, x_right, y)
-    y -= 8
+    y -= 10
     for i in range(4):
         c.drawString(x_left, y, "____")
         c.drawString(x_left + 50, y, "________________")
-        c.drawString(x_left + 220, y, "_______________")
-        c.drawString(x_left + 380, y, "________________")
-        y -= 16
+        c.drawString(x_left + 200, y, "_______________")
+        c.drawString(x_left + 350, y, "________________")
+        y -= 13
 
-    y -= 10
-    c.setFont("Helvetica-Bold", 11)
-    c.drawString(x_left, y, "DATOS DEL TÉCNICO")
+    # --- Datos del técnico ---
     y -= 18
-    c.setFont("Helvetica", 10)
+    c.setFont("Helvetica-Bold", 9)
+    c.drawString(x_left, y, "DATOS DEL TÉCNICO")
+    y -= 14
+    c.setFont("Helvetica", 8)
     if tecnico and tecnico.get('nombre_completo'):
         c.drawString(x_left, y, f"Nombre: {tecnico['nombre_completo']}")
     else:
         c.drawString(x_left, y, "Nombre: __________________________")
-    c.drawString(x_left + 250, y, "ID/C.I.: ________________")
-    c.drawString(x_left + 430, y, "Celular: ________________")
-    y -= 16
+    if tecnico and tecnico.get('cedula'):
+        c.drawString(x_left + 250, y, f"Cédula: {tecnico['cedula']}")
+    else:
+        c.drawString(x_left + 250, y, "Cédula: ________________")
+    if tecnico and tecnico.get('telefono'):
+        c.drawString(x_left + 430, y, f"Celular: {tecnico['telefono']}")
+    else:
+        c.drawString(x_left + 430, y, "Celular: ________________")
+    y -= 12
     c.drawString(x_left, y, "Firma: __________________________")
 
-    y -= 20
-    c.setFont("Helvetica-Bold", 11)
+    # --- Verificaciones y visita adicional ---
+    y -= 22
+    c.setFont("Helvetica-Bold", 9)
     c.drawString(x_left, y, "VERIFICACIONES")
-    y -= 16
-    c.setFont("Helvetica", 10)
+    y -= 12
+    c.setFont("Helvetica", 8)
     c.drawString(x_left, y, "[ ] Servicio funcional correctamente")
-    c.drawString(x_left + 220, y, "[ ] Velocidad verificada")
-    c.drawString(x_left + 430, y, "[ ] Cliente satisfecho")
+    c.drawString(x_left + 200, y, "[ ] Velocidad verificada")
+    c.drawString(x_left + 400, y, "[ ] Cliente satisfecho")
 
-    y -= 20
-    c.setFont("Helvetica-Bold", 11)
+    y -= 14
+    c.setFont("Helvetica-Bold", 9)
     c.drawString(x_left, y, "REQUIERE VISITA ADICIONAL/INSPECCION")
-    y -= 16
-    c.setFont("Helvetica", 10)
+    y -= 12
+    c.setFont("Helvetica", 8)
     c.drawString(x_left, y, "[ ] Cableado dañado")
     c.drawString(x_left + 160, y, "[ ] Equipo defectuoso")
     c.drawString(x_left + 320, y, "[ ] Servicio no resuelto")
     c.drawString(x_left + 480, y, "[ ] Solo inspección")
 
-    y -= 25
-    c.setFont("Helvetica-Bold", 11)
+    # --- Validación final ---
+    y -= 24
+    c.setFont("Helvetica-Bold", 9)
     c.drawString(x_left, y, "VALIDACION FINAL")
-    y -= 18
-    c.setFont("Helvetica", 10)
+    y -= 14
+    c.setFont("Helvetica", 8)
     c.drawString(x_left, y, "Cliente: ________________")
     c.drawString(x_left + 180, y, "Técnico: ________________")
     c.drawString(x_left + 360, y, "Revisado por: ________________")
-    y -= 14
+    y -= 12
     c.drawString(x_left, y, "Firma: ________________")
     c.drawString(x_left + 180, y, "Firma: ________________")
     c.drawString(x_left + 360, y, "Firma: ________________")
 
-    c.setFont("Helvetica-Oblique", 8)
+    c.setFont("Helvetica-Oblique", 6)
     c.drawCentredString(width/2, 20, "Documento generado automáticamente - Sistema de Reportes de Fallas v1.0")
 
     c.save()
@@ -1200,6 +1433,18 @@ def generar_pdf_planilla(cliente, tecnico, motivo, tipo_falla, observaciones, nu
 @app.route('/planilla_soporte')
 @login_required
 def planilla_soporte():
+    ticket_id = request.args.get('ticket_id', type=int)
+    ticket = None
+    cliente = None
+    if ticket_id:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM tickets WHERE id = %s", (ticket_id,))
+        ticket = cur.fetchone()
+        if ticket:
+            cur.execute("SELECT * FROM clientes WHERE nombre_apellido = %s LIMIT 1", (ticket['cliente'],))
+            cliente = cur.fetchone()
+        cur.close()
     generados = []
     if os.path.exists(GENERADOS_FOLDER):
         for f in os.listdir(GENERADOS_FOLDER):
@@ -1228,60 +1473,105 @@ def planilla_soporte():
                     })
                 else:
                     generados.append({'archivo': f, 'cliente': '?', 'fecha': '', 'cliente_id': ''})
-    cliente_nombre = request.args.get('cliente_nombre', '')
-    motivo = request.args.get('motivo', '')
-    tipo_falla = request.args.get('tipo_falla', '')
-    observaciones = request.args.get('observaciones', '')
-    ticket_id = request.args.get('ticket_id', '')
-    return render_template('planilla_soporte.html', generados=generados, motivos=MOTIVOS_TICKET, tipos_falla=TIPOS_FALLA,
-                           cliente_nombre=cliente_nombre, motivo=motivo, tipo_falla=tipo_falla,
-                           observaciones=observaciones, ticket_id=ticket_id)
+    return render_template('planilla_soporte.html', 
+                           generados=generados, 
+                           motivos=MOTIVOS_TICKET, 
+                           tipos_falla=TIPOS_FALLA,
+                           ticket=ticket,
+                           cliente=cliente)
 
 @app.route('/planilla_soporte/generar_planilla', methods=['POST'])
 @login_required
 def generar_planilla_cliente():
-    cliente_id = request.form.get('cliente_id')
-    tecnico_id = request.form.get('tecnico_id')
-    motivo = request.form.get('motivo_ticket')
-    tipo_falla = request.form.get('tipo_falla')
-    observaciones_adicionales = request.form.get('observaciones_adicionales', '').strip()
-    num_ticket = request.form.get('num_ticket', '').strip()
-    hora_inicio = request.form.get('hora_inicio', '').strip()
-    hora_fin = request.form.get('hora_fin', '').strip()
-
-    if not cliente_id:
-        flash('Falta seleccionar un cliente', 'danger')
-        return redirect(url_for('planilla_soporte'))
+    ticket_id = request.form.get('ticket_id', '').strip()
+    cliente_id = request.form.get('cliente_id', '').strip()
+    tipo_planilla = request.form.get('tipo_planilla', 'soporte').strip().lower()
 
     conn = get_db()
     cur = conn.cursor()
-    cur.execute("SELECT * FROM clientes WHERE id = %s", (cliente_id,))
-    cliente = cur.fetchone()
-    if not cliente:
-        flash('Cliente no encontrado', 'danger')
-        cur.close()
-        return redirect(url_for('planilla_soporte'))
-    cur.close()
 
+    ticket = None
+    cliente = None
     tecnico = None
-    if tecnico_id:
-        conn = get_db()
-        cur = conn.cursor()
-        cur.execute("SELECT id, username, nombre_completo FROM trabajadores WHERE id = %s AND rol = 'tecnico'", (tecnico_id,))
-        tecnico = cur.fetchone()
-        cur.close()
 
-    if not num_ticket:
+    if ticket_id:
+        cur.execute("SELECT * FROM tickets WHERE id = %s", (ticket_id,))
+        ticket = cur.fetchone()
+        if not ticket:
+            cur.close()
+            flash('Ticket no encontrado', 'danger')
+            return redirect(url_for('planilla_soporte'))
+
+        # Obtener cliente asociado
+        if cliente_id:
+            cur.execute("SELECT * FROM clientes WHERE id = %s", (cliente_id,))
+            cliente = cur.fetchone()
+        elif ticket.get('cliente'):
+            cur.execute("SELECT * FROM clientes WHERE nombre_apellido = %s LIMIT 1", (ticket['cliente'],))
+            cliente = cur.fetchone()
+
+        # Si no se encuentra cliente, creamos uno provisional con el nombre del ticket
+        if not cliente:
+            cliente = {
+                'id': None,
+                'nombre_apellido': ticket.get('cliente', ''),
+                'direccion_servicio': '',
+                'telefono': '',
+                'nodo': '',
+                'mbps_contratados': '',
+                'estatus_usuario': '',
+                'asignador': ''
+            }
+
+        # Obtener técnico por tecnico_id si existe
+        if ticket.get('tecnico_id'):
+            cur.execute("SELECT id, username, nombre_completo, cedula, telefono FROM trabajadores WHERE id = %s AND rol = 'tecnico'", (ticket['tecnico_id'],))
+            tecnico = cur.fetchone()
+    else:
+        if not cliente_id:
+            cur.close()
+            flash('Debe seleccionar un ticket o cliente', 'danger')
+            return redirect(url_for('planilla_soporte'))
+        cur.execute("SELECT * FROM clientes WHERE id = %s", (cliente_id,))
+        cliente = cur.fetchone()
+        if not cliente:
+            cur.close()
+            flash('Cliente no encontrado', 'danger')
+            return redirect(url_for('planilla_soporte'))
         num_ticket = generar_numero_ticket()
+        ticket = {
+            'num_ticket': num_ticket,
+            'motivo_ticket': '',
+            'tipo_falla': '',
+            'observaciones': '',
+            'cliente': cliente['nombre_apellido']
+        }
+
+    # Si no es soporte, no usar número de ticket
+    if tipo_planilla != 'soporte':
+        num_ticket = ''
+    else:
+        num_ticket = ticket.get('num_ticket', '') if ticket else ''
+
+    motivo = ticket.get('motivo_ticket', '') if ticket else ''
+    tipo_falla = ticket.get('tipo_falla', '') if ticket else ''
+    observaciones = ticket.get('observaciones', '') if ticket else ''
+
+    numero_correlativo = generar_numero_correlativo(tipo_planilla)
 
     try:
-        pdf_buffer = generar_pdf_planilla(cliente, tecnico, motivo, tipo_falla, observaciones_adicionales, num_ticket, hora_inicio, hora_fin)
+        pdf_buffer = generar_pdf_planilla(
+            cliente, tecnico, motivo, tipo_falla, observaciones,
+            num_ticket, '', '', tipo_planilla, numero_correlativo
+        )
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        output_filename = f"planilla_{cliente_id}_{timestamp}.pdf"
+        # Usar el id del cliente o 0 si es provisional
+        cliente_id_final = cliente['id'] if cliente.get('id') else 0
+        output_filename = f"planilla_{cliente_id_final}_{timestamp}.pdf"
         output_path = os.path.join(GENERADOS_FOLDER, output_filename)
         with open(output_path, 'wb') as f:
             f.write(pdf_buffer.read())
-        flash(f'Planilla PDF generada correctamente con ticket {num_ticket}', 'success')
+        flash(f'Planilla PDF generada correctamente', 'success')
         return redirect(url_for('preview_planilla', filename=output_filename))
     except Exception as e:
         flash(f'Error al generar planilla: {str(e)}', 'danger')
@@ -1305,6 +1595,7 @@ def descargar_generado(filename):
 @app.route('/planilla_soporte/eliminar_generado/<filename>', methods=['POST'])
 @login_required
 def eliminar_generado(filename):
+    filename = os.path.basename(filename)
     filepath = os.path.join(GENERADOS_FOLDER, filename)
     if os.path.exists(filepath):
         os.remove(filepath)
@@ -1322,6 +1613,7 @@ def eliminar_seleccionadas():
         return redirect(url_for('planilla_soporte'))
     eliminados = 0
     for filename in archivos:
+        filename = os.path.basename(filename)
         filepath = os.path.join(GENERADOS_FOLDER, filename)
         if os.path.exists(filepath):
             os.remove(filepath)
@@ -1330,61 +1622,65 @@ def eliminar_seleccionadas():
     return redirect(url_for('planilla_soporte'))
 
 # ============================================================
-#   RESPALDOS (COMPLETO)
+#   RESPALDOS
 # ============================================================
-def registrar_respaldo(filename, filepath, tipo):
-    try:
-        size = os.path.getsize(filepath)
-        conn = get_db()
-        cur = conn.cursor()
-        cur.execute("INSERT INTO backup_log (filename, filepath, size, tipo) VALUES (%s,%s,%s,%s)", (filename, filepath, size, tipo))
-        conn.commit()
-        cur.close()
-    except Exception as e:
-        print("Error registrando respaldo:", e)
+@app.route('/admin/respaldos')
+@login_required
+def listar_respaldos():
+    if current_user.rol != 'admin':
+        flash('Acceso denegado', 'danger')
+        return redirect(url_for('dashboard'))
+    backup_folder = app.config['BACKUP_FOLDER']
+    backups = []
+    if os.path.exists(backup_folder):
+        for f in os.listdir(backup_folder):
+            if f.endswith('.sql'):
+                ruta = os.path.join(backup_folder, f)
+                tamaño = os.path.getsize(ruta)
+                fecha_mod = datetime.fromtimestamp(os.path.getmtime(ruta))
+                backups.append({
+                    'nombre': f,
+                    'tamaño': tamaño,
+                    'fecha': fecha_mod.strftime('%d/%m/%Y %H:%M:%S'),
+                    'tamaño_legible': f"{tamaño / 1024:.1f} KB" if tamaño < 1024*1024 else f"{tamaño / (1024*1024):.2f} MB"
+                })
+    backups.sort(key=lambda x: x['fecha'], reverse=True)
+    return render_template('respaldos.html', backups=backups)
 
-def generar_respaldo_sql():
-    try:
-        os.makedirs(app.config['BACKUP_FOLDER'], exist_ok=True)
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        filename = f"backup_{timestamp}.sql"
-        filepath = os.path.join(app.config['BACKUP_FOLDER'], filename)
-        with open(filepath, 'w', encoding='utf-8') as f:
-            f.write(f"-- Respaldo generado: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-            f.write(f"-- Base de datos: {app.config['MYSQL_DB']}\n\n")
-            f.write("SET FOREIGN_KEY_CHECKS=0;\n\n")
-            tables = get_table_names()
-            conn = get_db()
-            cur = conn.cursor()
-            for table in tables:
-                create_sql = get_table_schema(table)
-                if create_sql:
-                    f.write(f"DROP TABLE IF EXISTS `{table}`;\n")
-                    f.write(f"{create_sql};\n\n")
-                cur.execute(f"SELECT * FROM `{table}`")
-                rows = cur.fetchall()
-                if rows:
-                    columns = [desc[0] for desc in cur.description]
-                    f.write(f"-- Datos de la tabla: {table}\n")
-                    for row in rows:
-                        values = []
-                        for val in row.values():
-                            if val is None:
-                                values.append('NULL')
-                            elif isinstance(val, (int, float)):
-                                values.append(str(val))
-                            elif isinstance(val, datetime):
-                                values.append(f"'{val.strftime('%Y-%m-%d %H:%M:%S')}'")
-                            else:
-                                escaped = str(val).replace("'", "''")
-                                values.append(f"'{escaped}'")
-                        f.write(f"INSERT INTO `{table}` (`{'`, `'.join(columns)}`) VALUES ({', '.join(values)});\n")
-                    f.write("\n")
-            f.write("SET FOREIGN_KEY_CHECKS=1;\n")
-        cur.close()
-        return filepath, None
-    except Exception as e:
-        return None, str(e)
+@app.route('/admin/respaldo/descargar/<filename>')
+@login_required
+def descargar_respaldo(filename):
+    if current_user.rol != 'admin':
+        flash('Acceso denegado', 'danger')
+        return redirect(url_for('dashboard'))
+    return send_from_directory(app.config['BACKUP_FOLDER'], filename, as_attachment=True)
+
+@app.route('/admin/respaldo/eliminar/<filename>', methods=['POST'])
+@login_required
+def eliminar_respaldo(filename):
+    if current_user.rol != 'admin':
+        flash('Acceso denegado', 'danger')
+        return redirect(url_for('dashboard'))
+    ruta = os.path.join(app.config['BACKUP_FOLDER'], filename)
+    if os.path.exists(ruta):
+        os.remove(ruta)
+        flash(f'Respaldo {filename} eliminado', 'success')
+    else:
+        flash('El archivo no existe', 'warning')
+    return redirect(url_for('listar_respaldos'))
+
+@app.route('/backup_manual', methods=['POST'])
+@login_required
+def backup_manual():
+    if current_user.rol != 'admin':
+        flash('Acceso denegado', 'danger')
+        return redirect(url_for('dashboard'))
+    filepath, error = crear_respaldo('manual')
+    if error:
+        flash(f'Error al generar respaldo: {error}', 'danger')
+    else:
+        flash(f'Respaldo generado correctamente: {os.path.basename(filepath)}', 'success')
+    return redirect(url_for('listar_respaldos'))
 
 def crear_respaldo(tipo='manual'):
     mysqldump_path = app.config.get('MYSQLDUMP_PATH')
@@ -1426,173 +1722,59 @@ def crear_respaldo(tipo='manual'):
             filepath, error = generar_respaldo_sql()
     else:
         filepath, error = generar_respaldo_sql()
-    if filepath and not error:
-        registrar_respaldo(os.path.basename(filepath), filepath, tipo)
     return filepath, error
 
-def get_table_names():
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute("SHOW TABLES")
-    tables = [list(row.values())[0] for row in cur.fetchall()]
-    cur.close()
-    return tables
+def generar_respaldo_sql():
+    try:
+        os.makedirs(app.config['BACKUP_FOLDER'], exist_ok=True)
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f"backup_{timestamp}.sql"
+        filepath = os.path.join(app.config['BACKUP_FOLDER'], filename)
+        with open(filepath, 'w', encoding='utf-8') as f:
+            f.write(f"-- Respaldo generado: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"-- Base de datos: {app.config['MYSQL_DB']}\n\n")
+            f.write("SET FOREIGN_KEY_CHECKS=0;\n\n")
+            conn = get_db()
+            cur = conn.cursor()
+            cur.execute("SHOW TABLES")
+            tables = [list(row.values())[0] for row in cur.fetchall()]
+            for table in tables:
+                cur.execute(f"SHOW CREATE TABLE `{table}`")
+                result = cur.fetchone()
+                if result and 'Create Table' in result:
+                    f.write(f"DROP TABLE IF EXISTS `{table}`;\n")
+                    f.write(f"{result['Create Table']};\n\n")
+                cur.execute(f"SELECT * FROM `{table}`")
+                rows = cur.fetchall()
+                if rows:
+                    columns = [desc[0] for desc in cur.description]
+                    f.write(f"-- Datos de la tabla: {table}\n")
+                    for row in rows:
+                        values = []
+                        for val in row.values():
+                            if val is None:
+                                values.append('NULL')
+                            elif isinstance(val, (int, float)):
+                                values.append(str(val))
+                            elif isinstance(val, datetime):
+                                values.append(f"'{val.strftime('%Y-%m-%d %H:%M:%S')}'")
+                            else:
+                                escaped = str(val).replace("'", "''")
+                                values.append(f"'{escaped}'")
+                        f.write(f"INSERT INTO `{table}` (`{'`, `'.join(columns)}`) VALUES ({', '.join(values)});\n")
+                    f.write("\n")
+            f.write("SET FOREIGN_KEY_CHECKS=1;\n")
+            cur.close()
+        return filepath, None
+    except Exception as e:
+        return None, str(e)
 
-def get_table_schema(table):
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute(f"SHOW CREATE TABLE `{table}`")
-    result = cur.fetchone()
-    cur.close()
-    return result['Create Table'] if result else None
-
-def respaldo_semanal():
-    with app.app_context():
-        filepath, error = crear_respaldo('semanal')
-        if error:
-            print(f"[ERROR] Respaldo semanal falló: {error}")
-        else:
-            print(f"[OK] Respaldo semanal generado: {filepath}")
-
-def respaldo_mensual():
-    with app.app_context():
-        filepath, error = crear_respaldo('mensual')
-        if error:
-            print(f"[ERROR] Respaldo mensual falló: {error}")
-        else:
-            print(f"[OK] Respaldo mensual generado: {filepath}")
-
-scheduler = BackgroundScheduler()
-scheduler.add_job(func=respaldo_semanal, trigger='cron', day_of_week='sun', hour=3, minute=0)
-scheduler.add_job(func=respaldo_mensual, trigger='cron', day=1, hour=4, minute=0)
-scheduler.start()
-atexit.register(lambda: scheduler.shutdown())
-
-@app.route('/backup_manual', methods=['POST'])
-@login_required
-def backup_manual():
-    if current_user.rol != 'admin':
-        flash('Acceso denegado', 'danger')
-        return redirect(url_for('dashboard'))
-    filepath, error = crear_respaldo('manual')
-    if error:
-        flash(f'Error al generar respaldo: {error}', 'danger')
-    else:
-        flash(f'Respaldo generado correctamente: {os.path.basename(filepath)}', 'success')
-    return redirect(url_for('admin_panel'))
-
-@app.route('/admin/respaldos')
-@login_required
-def listar_respaldos():
-    if current_user.rol != 'admin':
-        flash('Acceso denegado', 'danger')
-        return redirect(url_for('dashboard'))
-    backups = []
-    backup_dir = app.config['BACKUP_FOLDER']
-    if os.path.exists(backup_dir):
-        for f in os.listdir(backup_dir):
-            if f.endswith('.sql'):
-                ruta = os.path.join(backup_dir, f)
-                tamaño = os.path.getsize(ruta)
-                fecha_mod = datetime.fromtimestamp(os.path.getmtime(ruta))
-                backups.append({
-                    'nombre': f,
-                    'tamaño': tamaño,
-                    'fecha': fecha_mod.strftime('%d/%m/%Y %H:%M:%S'),
-                    'tamaño_legible': f"{tamaño / 1024:.1f} KB" if tamaño < 1024*1024 else f"{tamaño / (1024*1024):.2f} MB"
-                })
-    backups.sort(key=lambda x: x['fecha'], reverse=True)
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute("SELECT * FROM backup_log ORDER BY fecha DESC")
-    logs = cur.fetchall()
-    cur.close()
-    return render_template('respaldos.html', backups=backups, logs=logs)
-
-@app.route('/admin/respaldo/descargar/<filename>')
-@login_required
-def descargar_respaldo(filename):
-    if current_user.rol != 'admin':
-        flash('Acceso denegado', 'danger')
-        return redirect(url_for('dashboard'))
-    return send_from_directory(app.config['BACKUP_FOLDER'], filename, as_attachment=True)
-
-@app.route('/admin/respaldo/eliminar/<filename>', methods=['POST'])
-@login_required
-def eliminar_respaldo(filename):
-    if current_user.rol != 'admin':
-        flash('Acceso denegado', 'danger')
-        return redirect(url_for('dashboard'))
-    ruta = os.path.join(app.config['BACKUP_FOLDER'], filename)
-    if os.path.exists(ruta):
-        os.remove(ruta)
-        flash(f'Respaldo {filename} eliminado', 'success')
-    else:
-        flash('El archivo no existe', 'warning')
-    return redirect(url_for('listar_respaldos'))
-
-# ---------- API TÉCNICOS ----------
-@app.route('/api/tecnicos_json')
-@login_required
-def api_tecnicos_json():
-    def fetch_tecnicos():
-        conn = get_db()
-        cur = conn.cursor()
-        cur.execute("SELECT id, username, nombre_completo, online FROM trabajadores WHERE rol = 'tecnico' ORDER BY nombre_completo")
-        data = cur.fetchall()
-        cur.close()
-        return data
-    return jsonify(get_cache('tecnicos', fetch_tecnicos))
-
-# ---------- API BÚSQUEDA CLIENTES ----------
-@app.route('/api/buscar_cliente_json')
-@login_required
-def api_buscar_cliente():
-    q = request.args.get('q', '').strip()
-    if not q:
-        return jsonify([])
-    conn = get_db()
-    cur = conn.cursor()
-    q_upper = q.upper().strip()
-    cur.execute("""
-        SELECT id, n_contrato, nombre_apellido, telefono, nodo, n_documento, direccion_servicio, mbps_contratados, estatus_usuario, asignador
-        FROM clientes
-        WHERE UPPER(n_contrato) LIKE %s 
-           OR UPPER(nombre_apellido) LIKE %s 
-           OR UPPER(n_documento) LIKE %s 
-           OR UPPER(telefono) LIKE %s 
-           OR UPPER(nodo) LIKE %s
-           OR UPPER(direccion_servicio) LIKE %s
-        ORDER BY 
-            CASE 
-                WHEN UPPER(nombre_apellido) = %s THEN 1
-                WHEN UPPER(nombre_apellido) LIKE %s THEN 2
-                ELSE 3
-            END
-        LIMIT 20
-    """, (f'%{q_upper}%', f'%{q_upper}%', f'%{q_upper}%', f'%{q_upper}%', f'%{q_upper}%', f'%{q_upper}%', q_upper, f'%{q_upper}%'))
-    clientes = []
-    for c in cur.fetchall():
-        clientes.append({
-            'id': c['id'],
-            'nombre': c['nombre_apellido'],
-            'contrato': c['n_contrato'] or '',
-            'documento': c['n_documento'] or '',
-            'telefono': c['telefono'] or '',
-            'direccion': c['direccion_servicio'] or '',
-            'nodo': c['nodo'] or '',
-            'mbps': c['mbps_contratados'] or '',
-            'estatus': c['estatus_usuario'] or '',
-            'asignador': c['asignador'] or ''
-        })
-    cur.close()
-    return jsonify(clientes)
-
+# ============================================================
+#   API CLIENTE DETALLE
+# ============================================================
 @app.route('/api/cliente/<int:cliente_id>')
 @login_required
 def api_cliente_detalle(cliente_id):
-    if current_user.rol != 'admin':
-        return jsonify({'error': 'Acceso denegado'}), 403
     conn = get_db()
     cur = conn.cursor()
     cur.execute("SELECT * FROM clientes WHERE id = %s", (cliente_id,))
@@ -1605,26 +1787,13 @@ def api_cliente_detalle(cliente_id):
         'n_contrato': cliente['n_contrato'] or '',
         'n_documento': cliente['n_documento'] or '',
         'nombre_apellido': cliente['nombre_apellido'] or '',
+        'nombre': cliente['nombre_apellido'] or '',
         'telefono': cliente['telefono'] or '',
         'direccion_servicio': cliente['direccion_servicio'] or '',
         'nodo': cliente['nodo'] or '',
         'mbps_contratados': cliente['mbps_contratados'] or '',
-        'estatus_usuario': cliente['estatus_usuario'] or '',
-        'asignador': cliente.get('asignador', '') or ''
+        'estatus_usuario': cliente['estatus_usuario'] or ''
     })
-
-# ---------- API ASIGNADORES ----------
-@app.route('/api/asignadores')
-@login_required
-def api_asignadores():
-    def fetch_asignadores():
-        conn = get_db()
-        cur = conn.cursor()
-        cur.execute("SELECT DISTINCT asignador FROM clientes WHERE asignador IS NOT NULL AND asignador != '' ORDER BY asignador")
-        data = [row['asignador'] for row in cur.fetchall()]
-        cur.close()
-        return data
-    return jsonify(get_cache('asignadores', fetch_asignadores))
 
 # ---------- API USUARIOS EN LÍNEA ----------
 @app.route('/api/usuarios_online')
@@ -1634,13 +1803,17 @@ def api_usuarios_online():
         return jsonify({'error': 'Acceso denegado'}), 403
     conn = get_db()
     cur = conn.cursor()
-    cur.execute("SELECT id, username, nombre_completo, rol FROM trabajadores WHERE online = 1")
+    cur.execute("""
+        SELECT id, username, nombre_completo, rol, ultima_actividad 
+        FROM trabajadores 
+        WHERE online = 1 AND ultima_actividad > DATE_SUB(NOW(), INTERVAL 5 MINUTE)
+    """)
     usuarios = cur.fetchall()
     cur.close()
     return jsonify(usuarios)
 
 # ============================================================
-#        GRÁFICAS (SOLO ADMIN) - CORREGIDO PARA DIAS
+#        GRÁFICAS
 # ============================================================
 @app.route('/graficas')
 @login_required
@@ -1660,7 +1833,6 @@ def api_graficas_datos():
     cur = conn.cursor()
     try:
         if filtro == 'tickets':
-            # Semana
             cur.execute("""
                 SELECT YEARWEEK(fecha, 1) as semana, COUNT(*) as total 
                 FROM tickets 
@@ -1672,7 +1844,6 @@ def api_graficas_datos():
             semanas = [f"Sem {s['semana'] % 100}" for s in semanas_data]
             totales_semana = [s['total'] for s in semanas_data]
 
-            # Mes
             cur.execute("""
                 SELECT DATE_FORMAT(fecha, '%Y-%m') as mes, COUNT(*) as total 
                 FROM tickets 
@@ -1684,7 +1855,6 @@ def api_graficas_datos():
             meses = [datetime.strptime(m['mes'], '%Y-%m').strftime('%b %Y') for m in meses_data]
             totales_mes = [m['total'] for m in meses_data]
 
-            # Día (últimos 30 días) - USAR DATE_FORMAT para asegurar formato
             cur.execute("""
                 SELECT DATE_FORMAT(fecha, '%Y-%m-%d') as dia, COUNT(*) as total 
                 FROM tickets 
@@ -1693,10 +1863,9 @@ def api_graficas_datos():
                 ORDER BY dia ASC
             """)
             dias_data = cur.fetchall()
-            dias = [d['dia'] for d in dias_data]  # ya vienen como strings
+            dias = [d['dia'] for d in dias_data]
             totales_dia = [d['total'] for d in dias_data]
 
-            # Fallas
             cur.execute("""
                 SELECT tipo_falla, COUNT(*) as total 
                 FROM tickets 
@@ -1757,9 +1926,9 @@ def utility_processor():
     return dict(now=datetime.now, version=int(time.time()))
 
 # ============================================================
-#   EJECUCIÓN (Waitress)
+#   EJECUCIÓN
 # ============================================================
 if __name__ == '__main__':
-    from waitress import serve
     port = int(os.environ.get('PORT', 5000))
-    serve(app, host='0.0.0.0', port=port, threads=8, channel_timeout=120)
+    debug_mode = os.environ.get('FLASK_DEBUG', '0') == '1'
+    app.run(debug=debug_mode, host='0.0.0.0', port=port)

@@ -20,3 +20,5 @@ document.addEventListener('DOMContentLoaded', function() {
 function confirmarEliminar(mensaje) {
     return confirm(mensaje || '¿Estás seguro?');
 }
+
+console.log('Texto buscado:', filtro);

@@ -1,36 +1,36 @@
 {% extends "base.html" %}
 {% block title %}Tickets{% endblock %}
 {% block heading %}Tickets{% endblock %}
-{% block breadcrumb %}Gestión de tickets de soporte{% endblock %}
 
 {% block content %}
-<!-- Formulario para agregar ticket -->
-<div class="card mb-4">
-    <div class="card-header card-header-yellow">
-        <i class="fas fa-plus-circle me-2"></i> Agregar Ticket
+<!-- Formulario agregar ticket -->
+<div class="card">
+    <div class="card-header">
+        <i class="fas fa-plus-circle"></i> Agregar Ticket
+        <a href="/planilla_soporte" class="btn btn-amarillo btn-sm float-end"><i class="fas fa-file-pdf"></i> Generar Planilla</a>
     </div>
     <div class="card-body">
-        <form method="POST" action="{{ url_for('agregar_ticket') }}">
+        <form method="POST" action="/agregar_ticket" id="formAgregarTicket">
             <div class="row g-3">
-                <div class="col-md-6">
-                    <label class="form-label">Buscar Cliente *</label>
-                    <input type="text" id="buscarCliente" class="form-control" placeholder="Escriba nombre, cédula o contrato">
-                    <input type="hidden" name="cliente_id" id="cliente_id">
-                    <div id="mensajeCliente" class="text-danger small mt-1" style="display:none;"></div>
+                <div class="col-md-6 position-relative">
+                    <label class="form-label">Cliente *</label>
+                    <input type="text" id="buscarCliente" class="form-control" placeholder="Buscar por nombre, documento, contrato, teléfono..." autocomplete="off" required>
+                    <input type="hidden" name="cliente_id" id="cliente_id" value="">
+                    <input type="hidden" name="cliente_nombre_busqueda" id="cliente_nombre_busqueda" value="">
+                    <div id="resultadosClientes" class="dropdown-result" style="display:none; max-height: 300px; overflow-y: auto;"></div>
+                    <div id="mensajeCliente" class="text-danger small mt-1"></div>
                 </div>
                 <div class="col-md-6">
                     <label class="form-label">Nodo</label>
-                    <select name="nodo" class="form-select">
+                    <select name="nodo" id="nodoSelect" class="form-select">
                         <option value="">-- Seleccione --</option>
                         {% for n in nodos %}<option value="{{ n }}">{{ n }}</option>{% endfor %}
                     </select>
                 </div>
                 <div class="col-md-6">
-                    <label class="form-label">Motivo de Ticket</label>
+                    <label class="form-label">Motivo</label>
                     <input name="motivo_ticket" class="form-control" list="listaMotivos" placeholder="Escriba o seleccione...">
-                    <datalist id="listaMotivos">
-                        {% for m in motivos %}<option value="{{ m }}">{% endfor %}
-                    </datalist>
+                    <datalist id="listaMotivos">{% for m in motivos %}<option value="{{ m }}">{% endfor %}</datalist>
                 </div>
                 <div class="col-md-6">
                     <label class="form-label">Visita Técnica</label>
@@ -43,14 +43,11 @@
                 <div class="col-md-6">
                     <label class="form-label">Tipo de Falla</label>
                     <input name="tipo_falla" class="form-control" list="listaFallas" placeholder="Escriba o seleccione...">
-                    <datalist id="listaFallas">
-                        {% for t in tipos_falla %}<option value="{{ t }}">{% endfor %}
-                    </datalist>
+                    <datalist id="listaFallas">{% for t in tipos_falla %}<option value="{{ t }}">{% endfor %}</datalist>
                 </div>
                 <div class="col-md-3">
                     <label class="form-label">Status</label>
                     <select name="status" class="form-select">
-                        <option value="">-- Seleccione --</option>
                         <option value="Pendiente">Pendiente</option>
                         <option value="En proceso">En proceso</option>
                         <option value="Resuelto">Resuelto</option>
@@ -59,12 +56,21 @@
                 </div>
                 <div class="col-md-3">
                     <label class="form-label">Responsable</label>
-                    <input name="responsable" class="form-control" list="listaTecnicos" placeholder="Escriba o seleccione...">
-                    <datalist id="listaTecnicos">
+                    <select name="responsable" class="form-select" required>
+                        <option value="">-- Seleccione --</option>
+                        <option value="Yanibel Martinel">Yanibel Martinez</option>
+                        <option value="Jonh Jiraldo">Jhon Giraldo</option>
+                        <option value="Andres Reyes">Andres Reyes</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Técnico Asignado</label>
+                    <select name="tecnico_id" id="tecnico_id" class="form-select">
+                        <option value="">-- Seleccione --</option>
                         {% for t in tecnicos %}
-                        <option value="{{ t }}">
+                        <option value="{{ t.id }}">{{ t.nombre_completo }} (C.I: {{ t.cedula or 'N/A' }})</option>
                         {% endfor %}
-                    </datalist>
+                    </select>
                 </div>
                 <div class="col-12">
                     <label class="form-label">Observaciones</label>
@@ -78,35 +84,34 @@
     </div>
 </div>
 
-<!-- Carga de archivo -->
-<div class="card mb-4">
-    <div class="card-header card-header-blue">
-        <i class="fas fa-upload me-2"></i> Cargar Archivo
-    </div>
+<!-- Importar tickets -->
+<div class="card">
+    <div class="card-header"><i class="fas fa-upload"></i> Importar Tickets desde Excel/CSV</div>
     <div class="card-body">
-        <form method="POST" action="{{ url_for('cargar_tickets') }}" enctype="multipart/form-data">
+        <form method="POST" action="/cargar_tickets" enctype="multipart/form-data">
             <div class="input-group">
-                <input type="file" name="archivo" class="form-control" accept=".xlsx,.csv">
+                <input type="file" name="archivo" class="form-control" accept=".xlsx,.csv" required>
                 <button class="btn btn-amarillo" type="submit"><i class="fas fa-upload"></i> Importar</button>
             </div>
         </form>
     </div>
 </div>
 
-<!-- Buscador -->
-<div class="mb-3">
-    <input type="text" id="buscadorTickets" class="form-control" placeholder="Buscar tickets...">
+<!-- Buscador y tabla de tickets -->
+<div class="card">
+    <div class="card-header"><i class="fas fa-search"></i> Búsqueda de Tickets</div>
+    <div class="card-body">
+        <input type="text" id="buscadorTickets" class="form-control" placeholder="Escriba para filtrar por número, cliente, nodo, motivo..." autocomplete="off">
+        <div class="mt-2"><span id="contadorTickets" class="text-muted small"></span></div>
+    </div>
 </div>
 
-<!-- Tabla de tickets -->
 <div class="card">
-    <div class="card-header card-header-yellow">
-        <i class="fas fa-list me-2"></i> Lista de Tickets
-    </div>
+    <div class="card-header"><i class="fas fa-list"></i> Listado de Tickets</div>
     <div class="card-body">
         <div class="table-responsive">
-            <table class="table table-hover align-middle">
-                <thead class="table-dark">
+            <table class="table table-hover align-middle" id="tablaTickets">
+                <thead>
                     <tr>
                         <th>N° Ticket</th>
                         <th>Fecha</th>
@@ -115,6 +120,7 @@
                         <th>Tipo Falla</th>
                         <th>Status</th>
                         <th>Responsable</th>
+                        <th>Técnico</th>
                         <th>Acciones</th>
                     </tr>
                 </thead>
@@ -126,26 +132,18 @@
                         <td>{{ ticket.cliente }}</td>
                         <td>{{ ticket.motivo_ticket }}</td>
                         <td>{{ ticket.tipo_falla }}</td>
-                        <td>
-                            {% if ticket.status == 'Pendiente' %}
-                            <span class="badge bg-warning">Pendiente</span>
-                            {% elif ticket.status == 'En proceso' %}
-                            <span class="badge bg-info">En proceso</span>
-                            {% elif ticket.status == 'Resuelto' %}
-                            <span class="badge bg-success">Resuelto</span>
-                            {% elif ticket.status == 'No resuelto' %}
-                            <span class="badge bg-danger">No resuelto</span>
-                            {% else %}
-                            <span class="badge bg-secondary">{{ ticket.status }}</span>
-                            {% endif %}
-                        </td>
+                        <td><span class="badge {% if ticket.status == 'Pendiente' %}badge-warning{% elif ticket.status == 'En proceso' %}badge-info{% elif ticket.status == 'Resuelto' %}badge-success{% else %}badge-danger{% endif %}">{{ ticket.status }}</span></td>
                         <td>{{ ticket.responsable }}</td>
+                        <td>{{ ticket.tecnico_nombre or '—' }}</td>
                         <td>
-                            <a href="{{ url_for('detalle_ticket', ticket_id=ticket.id) }}" class="btn btn-sm btn-primary" title="Ver"><i class="fas fa-eye"></i></a>
-                            <a href="{{ url_for('editar_ticket', ticket_id=ticket.id) }}" class="btn btn-sm btn-success" title="Editar"><i class="fas fa-pencil-alt"></i></a>
-                            <form method="POST" action="{{ url_for('eliminar_ticket', ticket_id=ticket.id) }}" style="display:inline;" onsubmit="return confirm('¿Eliminar este ticket?')">
-                                <button type="submit" class="btn btn-sm btn-danger" title="Eliminar"><i class="fas fa-trash-alt"></i></button>
-                            </form>
+                            <div class="btn-group" role="group">
+                                <a href="/ticket/{{ ticket.id }}" class="btn btn-sm btn-outline-primary" title="Ver"><i class="fas fa-eye"></i></a>
+                                <a href="/ticket/{{ ticket.id }}/editar" class="btn btn-sm btn-outline-success" title="Editar"><i class="fas fa-edit"></i></a>
+                                <a href="/planilla_soporte?ticket_id={{ ticket.id }}" class="btn btn-sm btn-amarillo" title="Generar planilla"><i class="fas fa-file-pdf"></i></a>
+                                <form method="POST" action="/ticket/{{ ticket.id }}/eliminar" onsubmit="return confirm('¿Eliminar este ticket?')">
+                                    <button type="submit" class="btn btn-sm btn-outline-danger" title="Eliminar"><i class="fas fa-trash"></i></button>
+                                </form>
+                            </div>
                         </td>
                     </tr>
                     {% endfor %}
@@ -154,54 +152,142 @@
         </div>
     </div>
 </div>
-{% endblock %}
 
-{% block scripts %}
 <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 <script>
 $(document).ready(function() {
-    // Búsqueda de cliente para agregar ticket
-    $('#buscarCliente').on('keypress', function(e) {
-        if (e.which === 13) {
-            e.preventDefault();
-            var texto = $(this).val().trim();
-            if (texto) buscarCliente(texto);
-        }
-    });
+    // Autocompletado de cliente
+    var timeoutBusqueda;
+    var $inputCliente = $('#buscarCliente');
+    var $resultadosClientes = $('#resultadosClientes');
+    var $clienteId = $('#cliente_id');
+    var $clienteNombreBusqueda = $('#cliente_nombre_busqueda');
+    var $mensajeCliente = $('#mensajeCliente');
+    var $nodoSelect = $('#nodoSelect');
 
-    function buscarCliente(texto) {
-        $.get('/api/buscar_cliente_json', { q: texto }, function(data) {
-            if (data.length === 1) {
-                $('#cliente_id').val(data[0].id);
-                $('#buscarCliente').val(data[0].nombre);
-                $('#mensajeCliente').hide();
-            } else if (data.length > 1) {
-                var lista = '<ul class="list-group">';
-                data.forEach(function(c) {
-                    lista += '<li class="list-group-item list-group-item-action" data-id="'+c.id+'">'+c.nombre+' ('+c.contrato+')</li>';
-                });
-                lista += '</ul>';
-                $('#mensajeCliente').html('Varios clientes encontrados. Seleccione uno: ' + lista).show();
-                $('.list-group-item').on('click', function() {
+    function mostrarCliente(cliente) {
+        // No mostramos panel, solo actualizamos nodo
+    }
+
+    function actualizarNodo(nodoCliente) {
+        if (!nodoCliente) return;
+        var existe = false;
+        $nodoSelect.find('option').each(function() {
+            if ($(this).val() === nodoCliente) {
+                existe = true;
+                return false;
+            }
+        });
+        if (existe) {
+            $nodoSelect.val(nodoCliente);
+        } else {
+            var nuevaOpcion = new Option(nodoCliente, nodoCliente);
+            $nodoSelect.append(nuevaOpcion);
+            $nodoSelect.val(nodoCliente);
+        }
+    }
+
+    function seleccionarCliente(cliente) {
+        $clienteId.val(cliente.id);
+        $inputCliente.val(cliente.nombre);
+        $clienteNombreBusqueda.val(cliente.nombre);
+        actualizarNodo(cliente.nodo || '');
+        $resultadosClientes.hide().empty();
+        $mensajeCliente.text('').hide();
+        console.log('Cliente seleccionado:', cliente);
+    }
+
+    function buscarClientes(texto) {
+        if (texto.length < 2) {
+            $resultadosClientes.hide().empty();
+            $clienteId.val('');
+            $clienteNombreBusqueda.val('');
+            $mensajeCliente.text('').hide();
+            return;
+        }
+        $.ajax({
+            url: '/api/buscar_cliente_json',
+            data: { q: texto },
+            dataType: 'json',
+            success: function(data) {
+                var html = '';
+                if (data.length === 0) {
+                    html = '<div class="list-group-item text-muted">No se encontraron clientes</div>';
+                } else {
+                    data.forEach(function(c) {
+                        html += '<a href="#" class="list-group-item list-group-item-action cliente-item" data-id="'+c.id+'">';
+                        html += '<strong>'+c.nombre+'</strong> (Contrato: '+c.contrato+', Doc: '+c.documento+')';
+                        html += '</a>';
+                    });
+                }
+                $resultadosClientes.html(html).show();
+                $resultadosClientes.find('.cliente-item').off('mousedown').on('mousedown', function(e) {
+                    e.preventDefault();
                     var id = $(this).data('id');
-                    $('#cliente_id').val(id);
-                    $('#buscarCliente').val($(this).text().split(' (')[0]);
-                    $('#mensajeCliente').hide();
+                    $.get('/api/cliente/' + id, function(cliente) {
+                        seleccionarCliente(cliente);
+                    }).fail(function() {
+                        $mensajeCliente.text('Error al cargar los datos del cliente.').show();
+                    });
                 });
-            } else {
-                $('#cliente_id').val('');
-                $('#mensajeCliente').text('Cliente no encontrado').show();
+            },
+            error: function(xhr, status, error) {
+                console.error('Error en búsqueda de cliente:', status, error);
+                $resultadosClientes.html('<div class="list-group-item text-danger">Error al buscar clientes</div>').show();
+                $mensajeCliente.text('Error de conexión. Intente de nuevo.').show();
             }
         });
     }
 
-    // Filtro en tabla de tickets
-    $('#buscadorTickets').on('keyup', function() {
-        var value = $(this).val().toLowerCase();
-        $('table tbody tr').filter(function() {
-            $(this).toggle($(this).text().toLowerCase().indexOf(value) > -1);
-        });
+    $inputCliente.on('input', function() {
+        var texto = $(this).val().trim();
+        clearTimeout(timeoutBusqueda);
+        if (texto.length < 2) {
+            $resultadosClientes.hide().empty();
+            $clienteId.val('');
+            $clienteNombreBusqueda.val('');
+            $nodoSelect.val('');
+            $mensajeCliente.text('').hide();
+            return;
+        }
+        timeoutBusqueda = setTimeout(function() { buscarClientes(texto); }, 300);
     });
+
+    $inputCliente.on('blur', function() {
+        setTimeout(function() { $resultadosClientes.hide(); }, 200);
+    });
+
+    $inputCliente.on('focus', function() {
+        var texto = $(this).val().trim();
+        if (texto.length >= 2) buscarClientes(texto);
+    });
+
+    // Filtro local de tickets
+    var inputTabla = document.getElementById('buscadorTickets');
+    var tabla = document.getElementById('tablaTickets');
+    var contador = document.getElementById('contadorTickets');
+    if (inputTabla && tabla) {
+        var filas = tabla.querySelectorAll('tbody tr');
+        var sinResultados = null;
+        inputTabla.addEventListener('input', function() {
+            var filtro = this.value.toLowerCase().trim();
+            var resultadosVisibles = 0;
+            filas.forEach(function(fila) {
+                var textoFila = fila.textContent.toLowerCase();
+                var coincide = textoFila.indexOf(filtro) !== -1;
+                fila.style.display = coincide ? '' : 'none';
+                if (coincide) resultadosVisibles++;
+            });
+            if (contador) contador.textContent = resultadosVisibles + ' ticket(s) encontrado(s)';
+            var tbody = tabla.querySelector('tbody');
+            if (sinResultados) { sinResultados.remove(); sinResultados = null; }
+            if (resultadosVisibles === 0 && filtro !== '') {
+                sinResultados = document.createElement('tr');
+                sinResultados.innerHTML = '<td colspan="9" class="text-center text-muted">No se encontraron tickets</td>';
+                tbody.appendChild(sinResultados);
+            }
+        });
+    }
 });
 </script>
 {% endblock %}

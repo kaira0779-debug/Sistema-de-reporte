@@ -1,111 +1,74 @@
 {% extends "base.html" %}
 {% block title %}Editar Ticket{% endblock %}
-{% block heading %}Editar Ticket {{ ticket.num_ticket }}{% endblock %}
-{% block breadcrumb %}Modificar datos del ticket{% endblock %}
+{% block heading %}Editar Ticket{% endblock %}
 
 {% block content %}
-<div class="row justify-content-center">
-    <div class="col-lg-8">
-        <div class="card">
-            <div class="card-header">
-                <i class="fas fa-edit me-2" style="color: var(--primary);"></i> Editar Ticket
+<div class="card">
+    <div class="card-header"><i class="fas fa-edit"></i> Editar Ticket</div>
+    <div class="card-body">
+        <form method="POST" action="/ticket/{{ ticket.id }}/editar" class="row g-3">
+            <div class="col-md-6">
+                <label class="form-label">Nodo</label>
+                <select name="nodo" class="form-select">
+                    <option value="">-- Seleccione --</option>
+                    {% for n in nodos %}
+                    <option value="{{ n }}" {% if ticket.nodo == n %}selected{% endif %}>{{ n }}</option>
+                    {% endfor %}
+                </select>
             </div>
-            <div class="card-body">
-                <form method="POST">
-                    <div class="row">
-                        <div class="col-md-6 mb-3">
-                            <label class="form-label">N° Ticket</label>
-                            <input class="form-control" value="{{ ticket.num_ticket }}" readonly>
-                        </div>
-                        <div class="col-md-6 mb-3">
-                            <label class="form-label">Cliente</label>
-                            <input class="form-control" value="{{ ticket.cliente }}" readonly>
-                        </div>
-                    </div>
-                    <div class="row">
-                        <div class="col-md-6 mb-3">
-                            <label class="form-label">Fecha</label>
-                            <input class="form-control" value="{{ ticket.fecha.strftime('%d/%m/%Y') if ticket.fecha else '' }}" readonly>
-                        </div>
-                        <div class="col-md-6 mb-3">
-                            <label class="form-label">Nodo</label>
-                            <select name="nodo" class="form-select">
-                                <option value="">-- Seleccione --</option>
-                                {% for n in nodos %}
-                                <option value="{{ n }}" {% if ticket.nodo == n %}selected{% endif %}>{{ n }}</option>
-                                {% endfor %}
-                            </select>
-                        </div>
-                    </div>
-                    <div class="row">
-                        <div class="col-md-6 mb-3">
-                            <label class="form-label">Motivo de Ticket</label>
-                            <select name="motivo_ticket" class="form-select">
-                                <option value="">-- Seleccione --</option>
-                                {% for m in motivos %}
-                                <option value="{{ m }}" {% if ticket.motivo_ticket == m %}selected{% endif %}>{{ m }}</option>
-                                {% endfor %}
-                            </select>
-                        </div>
-                        <div class="col-md-6 mb-3">
-                            <label class="form-label">Visita Técnica</label>
-                            <select name="visita_tecnica" class="form-select">
-                                <option value="">-- Seleccione --</option>
-                                <option value="Sí" {% if ticket.visita_tecnica == 'Sí' %}selected{% endif %}>Sí</option>
-                                <option value="No" {% if ticket.visita_tecnica == 'No' %}selected{% endif %}>No</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div class="row">
-                        <div class="col-md-6 mb-3">
-                            <label class="form-label">Tipo de Falla</label>
-                            <select name="tipo_falla" class="form-select">
-                                <option value="">-- Seleccione --</option>
-                                {% for t in tipos_falla %}
-                                <option value="{{ t }}" {% if ticket.tipo_falla == t %}selected{% endif %}>{{ t }}</option>
-                                {% endfor %}
-                            </select>
-                        </div>
-                        <div class="col-md-6 mb-3">
-                            <label class="form-label">Departamento</label>
-                            <input name="departamento" class="form-control" value="{{ ticket.departamento or '' }}">
-                        </div>
-                    </div>
-                    <div class="row">
-                        <div class="col-md-4 mb-3">
-                            <label class="form-label">Status</label>
-                            <select name="status" class="form-select">
-                                <option value="">-- Seleccione --</option>
-                                {% for e in estados %}
-                                <option value="{{ e }}" {% if ticket.status == e %}selected{% endif %}>{{ e }}</option>
-                                {% endfor %}
-                            </select>
-                        </div>
-                        <div class="col-md-4 mb-3">
-                            <label class="form-label">Responsable</label>
-                            <select name="responsable" class="form-select">
-                                <option value="">-- Seleccione --</option>
-                                {% for r in responsables %}
-                                <option value="{{ r }}" {% if ticket.responsable == r %}selected{% endif %}>{{ r }}</option>
-                                {% endfor %}
-                            </select>
-                        </div>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Observaciones</label>
-                        <textarea name="observaciones" class="form-control" rows="3">{{ ticket.observaciones or '' }}</textarea>
-                    </div>
-                    <div class="d-flex justify-content-between">
-                        <a href="{{ url_for('detalle_ticket', ticket_id=ticket.id) }}" class="btn btn-secondary">
-                            <i class="fas fa-arrow-left"></i> Cancelar
-                        </a>
-                        <button type="submit" class="btn btn-amarillo">
-                            <i class="fas fa-save"></i> Guardar Cambios
-                        </button>
-                    </div>
-                </form>
+            <div class="col-md-6">
+                <label class="form-label">Motivo</label>
+                <input name="motivo_ticket" class="form-control" list="listaMotivos" value="{{ ticket.motivo_ticket or '' }}">
+                <datalist id="listaMotivos">{% for m in motivos %}<option value="{{ m }}">{% endfor %}</datalist>
             </div>
-        </div>
+            <div class="col-md-6">
+                <label class="form-label">Visita Técnica</label>
+                <select name="visita_tecnica" class="form-select">
+                    <option value="">-- Seleccione --</option>
+                    <option value="Sí" {% if ticket.visita_tecnica == 'Sí' %}selected{% endif %}>Sí</option>
+                    <option value="No" {% if ticket.visita_tecnica == 'No' %}selected{% endif %}>No</option>
+                </select>
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">Tipo de Falla</label>
+                <input name="tipo_falla" class="form-control" list="listaFallas" value="{{ ticket.tipo_falla or '' }}">
+                <datalist id="listaFallas">{% for t in tipos_falla %}<option value="{{ t }}">{% endfor %}</datalist>
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">Status</label>
+                <select name="status" class="form-select">
+                    {% for e in estados %}
+                    <option value="{{ e }}" {% if ticket.status == e %}selected{% endif %}>{{ e }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">Responsable</label>
+                <select name="responsable" class="form-select" required>
+                    <option value="">-- Seleccione --</option>
+                    <option value="Yanibel Martinel" {% if ticket.responsable == 'Yanibel Martinel' %}selected{% endif %}>Yanibel Martinez</option>
+                    <option value="Jonh Jiraldo" {% if ticket.responsable == 'Jonh Jiraldo' %}selected{% endif %}>Jhon Giraldo</option>
+                    <option value="Andres Reyes" {% if ticket.responsable == 'Andres Reyes' %}selected{% endif %}>Andres Reyes</option>
+                </select>
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">Técnico Asignado</label>
+                <select name="tecnico_id" class="form-select">
+                    <option value="">-- Seleccione --</option>
+                    {% for t in tecnicos %}
+                    <option value="{{ t.id }}" {% if ticket.tecnico_id == t.id %}selected{% endif %}>{{ t.nombre_completo }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-12">
+                <label class="form-label">Observaciones</label>
+                <textarea name="observaciones" class="form-control" rows="3">{{ ticket.observaciones or '' }}</textarea>
+            </div>
+            <div class="col-12">
+                <button type="submit" class="btn btn-amarillo"><i class="fas fa-save"></i> Guardar cambios</button>
+                <a href="/ticket/{{ ticket.id }}" class="btn btn-secondary">Cancelar</a>
+            </div>
+        </form>
     </div>
 </div>
 {% endblock %}

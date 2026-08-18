@@ -1,26 +1,221 @@
-{% extends "base.html" %}
-{% block title %}Iniciar Sesión{% endblock %}
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Iniciar Sesión - DATINVOZ</title>
 
-{% block content %}
-<div class="auth-container">
+    <!-- Bootstrap 5 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Font Awesome 6 -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+
+    <style>
+        :root {
+            --amarillo: #f1c40f;
+            --amarillo-oscuro: #d4ac0d;
+            --negro: #0f0f0f;
+            --blanco: #ffffff;
+            --gris-oscuro: #1a1a1a;
+        }
+
+        * {
+            font-family: 'Inter', sans-serif;
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background: linear-gradient(145deg, #0a0a0a 0%, #1a1a1a 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem;
+            margin: 0;
+        }
+
+        .auth-card {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(241, 196, 15, 0.2);
+            border-radius: 24px;
+            padding: 3rem 2.5rem;
+            width: 100%;
+            max-width: 420px;
+            color: white;
+            box-shadow: 0 25px 60px rgba(0, 0, 0, 0.6), 0 0 40px rgba(241, 196, 15, 0.05);
+            text-align: center;
+        }
+
+        .auth-icon {
+            width: 80px;
+            height: 80px;
+            margin: 0 auto 1.5rem;
+            background: linear-gradient(135deg, #f1c40f, #f39c12);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2.2rem;
+            color: #0f0f0f;
+            box-shadow: 0 0 40px rgba(241, 196, 15, 0.4);
+            animation: pulseGlow 2.5s infinite;
+        }
+
+        .auth-title {
+            font-weight: 800;
+            font-size: 1.7rem;
+            margin-bottom: 0.2rem;
+            letter-spacing: -0.4px;
+        }
+
+        .auth-subtitle {
+            color: #94a3b8;
+            font-size: 0.95rem;
+            margin-bottom: 2rem;
+        }
+
+        .input-group-custom {
+            position: relative;
+            margin-bottom: 1.2rem;
+        }
+
+        .input-group-custom i {
+            position: absolute;
+            left: 15px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--amarillo);
+            font-size: 1.1rem;
+            pointer-events: none;
+        }
+
+        .input-group-custom input {
+            width: 100%;
+            padding: 0.85rem 1rem 0.85rem 3.1rem;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 11px;
+            color: #fff;
+            font-size: 0.92rem;
+            outline: none;
+            transition: all 0.3s;
+        }
+
+        .input-group-custom input:focus {
+            border-color: var(--amarillo);
+            background: rgba(255, 255, 255, 0.06);
+            box-shadow: 0 0 18px rgba(241, 196, 15, 0.08);
+        }
+
+        .input-group-custom input::placeholder {
+            color: #64748b;
+        }
+
+        .btn-auth {
+            width: 100%;
+            padding: 0.88rem;
+            background: linear-gradient(135deg, #f1c40f, #f39c12);
+            color: #0f0f0f;
+            font-weight: 700;
+            border: none;
+            border-radius: 11px;
+            cursor: pointer;
+            font-size: 0.98rem;
+            transition: all 0.3s;
+            box-shadow: 0 4px 20px rgba(241, 196, 15, 0.3);
+            margin-top: 1rem;
+        }
+
+        .btn-auth:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 36px rgba(241, 196, 15, 0.38);
+        }
+
+        .alert {
+            border-radius: 10px;
+            border: none;
+            padding: 0.75rem 1rem;
+            font-size: 0.85rem;
+            margin-bottom: 1rem;
+        }
+
+        .auth-footer {
+            color: #94a3b8;
+            font-size: 0.88rem;
+            margin-top: 1.5rem;
+        }
+
+        .auth-footer a {
+            color: var(--amarillo);
+            font-weight: 600;
+            text-decoration: none;
+            transition: color 0.2s;
+        }
+
+        .auth-footer a:hover {
+            color: #fff;
+        }
+
+        @keyframes pulseGlow {
+            0%, 100% { filter: drop-shadow(0 0 10px rgba(241, 196, 15, 0.4)); }
+            50% { filter: drop-shadow(0 0 24px rgba(241, 196, 15, 0.6)); }
+        }
+
+        @media (max-width: 480px) {
+            .auth-card {
+                padding: 2rem 1.5rem;
+                margin: 0 0.8rem;
+            }
+            .auth-title {
+                font-size: 1.5rem;
+            }
+        }
+    </style>
+</head>
+<body>
     <div class="auth-card">
         <div class="auth-icon">
-            <i class="fas fa-bolt"></i>
+            <i class="fas fa-network-wired"></i>
         </div>
-        <h3 class="auth-title">Sistema de Tickets</h3>
-        <p class="auth-subtitle">Inicia sesión con tu cuenta</p>
+        <h1 class="auth-title">DATINVOZ</h1>
+        <p class="auth-subtitle">Sistema de Reportes de Tickets</p>
 
-        <form method="POST" class="auth-form">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                        {{ message }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <form method="POST" action="{{ url_for('login') }}">
             <div class="input-group-custom">
                 <i class="fas fa-user"></i>
-                <input type="text" name="username" placeholder="Usuario" required>
+                <input type="text" name="username" placeholder="Usuario" required autofocus>
             </div>
             <div class="input-group-custom">
                 <i class="fas fa-lock"></i>
                 <input type="password" name="password" placeholder="Contraseña" required>
             </div>
-            <button type="submit" class="btn-auth">Ingresar</button>
+            <button type="submit" class="btn-auth">
+                <i class="fas fa-sign-in-alt me-2"></i> Iniciar sesión
+            </button>
         </form>
+
+        <div class="auth-footer">
+            <span>¿Olvidó su contraseña? Contacte al administrador.</span>
+        </div>
     </div>
-</div>
-{% endblock %}
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
