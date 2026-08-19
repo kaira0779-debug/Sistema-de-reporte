@@ -1,4 +1,5 @@
 import os
+import textwrap
 import re
 import csv
 import random
@@ -21,6 +22,7 @@ from reportlab.pdfgen import canvas as pdfcanvas
 from reportlab.lib import colors
 from reportlab.lib.units import inch
 from io import BytesIO
+from reportlab.pdfbase.pdfmetrics import stringWidth
 import difflib
 import tempfile
 import chardet
@@ -1279,98 +1281,154 @@ def generar_pdf_planilla(cliente, tecnico, motivo, tipo_falla, observaciones, nu
     buffer = BytesIO()
     c = pdfcanvas.Canvas(buffer, pagesize=letter)
     width, height = letter
-    margin = 40
+
+    # Márgenes uniformes
+    margin = 50
     x_left = margin
     x_right = width - margin
     y = height - margin
 
-    # --- Encabezado ---
-    c.setFont("Helvetica-Bold", 13)
-    c.drawCentredString(width/2, y, "DAITNVOZ C.A")
+    # ------------------- ENCABEZADO -------------------
+    c.setFont("Helvetica-Bold", 14)
+    c.drawCentredString(width / 2, y, "DATINVOZ C.A")
     c.setFont("Helvetica", 8)
-    c.drawCentredString(width/2, y - 13, "Avenida Principal de los Chorros, Qta Datinvoz, Caracas 1071, Distrito Capital, Venezuela")
-    c.drawCentredString(width/2, y - 24, "Teléfono: 0424-1637944")
-    c.setFont("Helvetica-Bold", 10)
+    c.drawCentredString(width / 2, y - 13,
+                        "Avenida Principal de los Chorros, Qta Datinvoz, Caracas 1071, Distrito Capital, Venezuela")
+    c.drawCentredString(width / 2, y - 24, "Teléfono: 0424-1637944")
+    c.setFont("Helvetica-Bold", 11)
     if tipo_planilla.lower() == 'soporte':
-        c.drawCentredString(width/2, y - 38, "ORDEN DE SERVICIO TECNICO - SOPORTE DE INTERNET")
+        c.drawCentredString(width / 2, y - 40, "ORDEN DE SERVICIO TECNICO - SOPORTE DE INTERNET")
     else:
-        c.drawCentredString(width/2, y - 38, f"ORDEN DE SERVICIO TECNICO - {tipo_planilla.upper()}")
+        c.drawCentredString(width / 2, y - 40, f"ORDEN DE SERVICIO TECNICO - {tipo_planilla.upper()}")
 
     # Número correlativo en esquina superior derecha
-    c.setFont("Helvetica", 8)
-    c.drawRightString(x_right, y - 12, f"N° Correlativo: {numero_correlativo if numero_correlativo else '________'}")
+    c.setFont("Helvetica", 9)
+    c.drawRightString(x_right, y - 10, f"N° Correlativo: {numero_correlativo if numero_correlativo else '________'}")
 
     # Línea separadora
     c.setStrokeColor(colors.black)
-    c.line(x_left, y - 48, x_right, y - 48)
+    c.line(x_left, y - 50, x_right, y - 50)
 
-    # Bloque de datos del ticket/fecha/hora
-    y = y - 62
-    c.setFont("Helvetica", 8)
+    # ------------------- DATOS DEL TICKET -------------------
+    y = y - 65
+    c.setFont("Helvetica", 9)
     if tipo_planilla.lower() == 'soporte':
         c.drawString(x_left, y, f"N° Ticket: {num_ticket if num_ticket else '______________'}")
-        c.drawString(x_left + 200, y, f"Fecha: {datetime.now().strftime('%d/%m/%Y')}")
-        c.drawString(x_left + 350, y, f"Hora Inicio: {hora_inicio if hora_inicio else '________'}")
-        c.drawString(x_left + 500, y, f"Hora Fin: {hora_fin if hora_fin else '________'}")
+        c.drawString(x_left + 150, y, f"Fecha: {datetime.now().strftime('%d/%m/%Y')}")
+        c.drawString(x_left + 250, y, f"Hora Inicio: {hora_inicio if hora_inicio else '________'}")
+        c.drawString(x_left + 400, y, f"Hora Fin: {hora_fin if hora_fin else '________'}")
     else:
         c.drawString(x_left, y, f"Fecha: {datetime.now().strftime('%d/%m/%Y')}")
         c.drawString(x_left + 200, y, f"Hora Inicio: {hora_inicio if hora_inicio else '________'}")
         c.drawString(x_left + 400, y, f"Hora Fin: {hora_fin if hora_fin else '________'}")
 
-    y -= 22
-    # --- Datos del cliente ---
-    c.setFont("Helvetica-Bold", 9)
+    # ------------------- FUNCIÓN DE AJUSTE DE TEXTO -------------------
+    def wrap_text(text, font_name, font_size, max_width):
+        """Divide texto en líneas respetando ancho máximo real."""
+        if not text:
+            return ['']
+        words = text.split()
+        lines = []
+        current_line = ''
+        for word in words:
+            test_line = f"{current_line} {word}".strip()
+            if stringWidth(test_line, font_name, font_size) <= max_width:
+                current_line = test_line
+            else:
+                if current_line:
+                    lines.append(current_line)
+                current_line = word
+        if current_line:
+            lines.append(current_line)
+        return lines if lines else ['']
+
+    def draw_wrapped_text(text, x, y, font_name, font_size, line_height=12):
+        """Dibuja texto envuelto en líneas, retornando nueva posición Y."""
+        c.setFont(font_name, font_size)
+        max_width = x_right - x
+        lines = wrap_text(text, font_name, font_size, max_width)
+        for line in lines:
+            if y < 60:
+                c.showPage()
+                y = height - margin
+            c.drawString(x, y, line)
+            y -= line_height
+        return y
+
+    # ------------------- DATOS DEL CLIENTE -------------------
+    y -= 28
+    c.setFont("Helvetica-Bold", 10)
     c.drawString(x_left, y, "DATOS DEL CLIENTE")
-    y -= 14
-    c.setFont("Helvetica", 8)
-    nombre_cliente = cliente.get('nombre_apellido', '') if cliente.get('nombre_apellido') else '__________________________'
-    direccion = cliente.get('direccion_servicio', '') if cliente.get('direccion_servicio') else '__________________________'
-    telefono = cliente.get('telefono', '') if cliente.get('telefono') else '____________________'
-    c.drawString(x_left, y, f"Nombre/Empresa: {nombre_cliente}")
-    y -= 12
-    c.drawString(x_left, y, f"Dirección: {direccion}")
-    y -= 12
-    c.drawString(x_left, y, f"Teléfono: {telefono}")
+    y -= 18
+    nombre_cliente = cliente.get('nombre_apellido', '') if cliente.get('nombre_apellido') else ''
+    direccion = cliente.get('direccion_servicio', '') if cliente.get('direccion_servicio') else ''
+    telefono = cliente.get('telefono', '') if cliente.get('telefono') else ''
 
-    # --- Descripción del servicio ---
-    y -= 24
-    c.setFont("Helvetica-Bold", 9)
+    y = draw_wrapped_text(f"Nombre/Empresa: {nombre_cliente or '__________________________'}", x_left, y, "Helvetica", 9)
+    y -= 4
+    y = draw_wrapped_text(f"Dirección: {direccion or '__________________________'}", x_left, y, "Helvetica", 9)
+    y -= 4
+    y = draw_wrapped_text(f"Teléfono: {telefono or '____________________'}", x_left, y, "Helvetica", 9)
+
+    # ------------------- DESCRIPCIÓN DEL SERVICIO -------------------
+    y -= 20
+    c.setFont("Helvetica-Bold", 10)
     c.drawString(x_left, y, "DESCRIPCION DEL SERVICIO REALIZADO:")
-    y -= 12
-    c.setFont("Helvetica", 8)
-    for i in range(4):
-        c.line(x_left, y - i*13, x_right, y - i*13)
-    if observaciones:
-        lines = observaciones.split('\n')
-        for i, line in enumerate(lines[:4]):
-            c.drawString(x_left + 4, y - i*13 - 3, line[:75])
+    y -= 16
 
-    # --- Materiales ---
-    y -= 62
-    c.setFont("Helvetica-Bold", 9)
+    # Dibujar observaciones completas, sin límite
+    c.setFont("Helvetica", 9)
+    obs_text = observaciones if observaciones else ''
+    lines = wrap_text(obs_text, "Helvetica", 9, x_right - x_left)
+    for line in lines:
+        if y < 60:
+            c.showPage()
+            y = height - margin
+            c.setFont("Helvetica", 9)
+        c.drawString(x_left + 4, y, line)
+        y -= 12
+
+    # Líneas adicionales en blanco para escritura manual
+    blank_lines = 4
+    for _ in range(blank_lines):
+        if y < 60:
+            c.showPage()
+            y = height - margin
+        c.line(x_left, y, x_right, y)
+        y -= 14
+
+    # ------------------- MATERIALES -------------------
+    y -= 15
+    if y < 80:
+        c.showPage()
+        y = height - margin
+    c.setFont("Helvetica-Bold", 10)
     c.drawString(x_left, y, "MATERIALES ENTREGADOS / INSTALADOS")
-    y -= 12
-    c.setFont("Helvetica", 7)
+    y -= 16
+    c.setFont("Helvetica", 8)
     c.drawString(x_left, y, "Cant.")
     c.drawString(x_left + 50, y, "Descripción")
     c.drawString(x_left + 200, y, "Serial/N° Lote")
     c.drawString(x_left + 350, y, "Observaciones")
-    y -= 6
+    y -= 8
     c.line(x_left, y, x_right, y)
-    y -= 10
+    y -= 12
     for i in range(4):
         c.drawString(x_left, y, "____")
         c.drawString(x_left + 50, y, "________________")
         c.drawString(x_left + 200, y, "_______________")
         c.drawString(x_left + 350, y, "________________")
-        y -= 13
+        y -= 14
 
-    # --- Datos del técnico ---
+    # ------------------- DATOS DEL TÉCNICO -------------------
     y -= 18
-    c.setFont("Helvetica-Bold", 9)
+    if y < 80:
+        c.showPage()
+        y = height - margin
+    c.setFont("Helvetica-Bold", 10)
     c.drawString(x_left, y, "DATOS DEL TÉCNICO")
-    y -= 14
-    c.setFont("Helvetica", 8)
+    y -= 16
+    c.setFont("Helvetica", 9)
     if tecnico and tecnico.get('nombre_completo'):
         c.drawString(x_left, y, f"Nombre: {tecnico['nombre_completo']}")
     else:
@@ -1383,45 +1441,52 @@ def generar_pdf_planilla(cliente, tecnico, motivo, tipo_falla, observaciones, nu
         c.drawString(x_left + 430, y, f"Celular: {tecnico['telefono']}")
     else:
         c.drawString(x_left + 430, y, "Celular: ________________")
-    y -= 12
+    y -= 14
     c.drawString(x_left, y, "Firma: __________________________")
 
-    # --- Verificaciones y visita adicional ---
-    y -= 22
-    c.setFont("Helvetica-Bold", 9)
+    # ------------------- VERIFICACIONES -------------------
+    y -= 24
+    if y < 80:
+        c.showPage()
+        y = height - margin
+    c.setFont("Helvetica-Bold", 10)
     c.drawString(x_left, y, "VERIFICACIONES")
-    y -= 12
-    c.setFont("Helvetica", 8)
+    y -= 14
+    c.setFont("Helvetica", 9)
     c.drawString(x_left, y, "[ ] Servicio funcional correctamente")
     c.drawString(x_left + 200, y, "[ ] Velocidad verificada")
     c.drawString(x_left + 400, y, "[ ] Cliente satisfecho")
 
-    y -= 14
-    c.setFont("Helvetica-Bold", 9)
+    y -= 16
+    c.setFont("Helvetica-Bold", 10)
     c.drawString(x_left, y, "REQUIERE VISITA ADICIONAL/INSPECCION")
-    y -= 12
-    c.setFont("Helvetica", 8)
-    c.drawString(x_left, y, "[ ] Cableado dañado")
-    c.drawString(x_left + 160, y, "[ ] Equipo defectuoso")
-    c.drawString(x_left + 320, y, "[ ] Servicio no resuelto")
-    c.drawString(x_left + 480, y, "[ ] Solo inspección")
-
-    # --- Validación final ---
-    y -= 24
-    c.setFont("Helvetica-Bold", 9)
-    c.drawString(x_left, y, "VALIDACION FINAL")
     y -= 14
-    c.setFont("Helvetica", 8)
+    c.setFont("Helvetica", 9)
+    c.drawString(x_left, y, "[ ] Cableado dañado")
+    c.drawString(x_left + 100, y, "[ ] Equipo defectuoso")
+    c.drawString(x_left + 220, y, "[ ] Servicio no resuelto")
+    c.drawString(x_left + 380, y, "[ ] Solo inspección")
+
+    # ------------------- VALIDACIÓN FINAL -------------------
+    y -= 24
+    if y < 80:
+        c.showPage()
+        y = height - margin
+    c.setFont("Helvetica-Bold", 10)
+    c.drawString(x_left, y, "VALIDACION FINAL")
+    y -= 16
+    c.setFont("Helvetica", 9)
     c.drawString(x_left, y, "Cliente: ________________")
     c.drawString(x_left + 180, y, "Técnico: ________________")
     c.drawString(x_left + 360, y, "Revisado por: ________________")
-    y -= 12
+    y -= 14
     c.drawString(x_left, y, "Firma: ________________")
     c.drawString(x_left + 180, y, "Firma: ________________")
     c.drawString(x_left + 360, y, "Firma: ________________")
 
-    c.setFont("Helvetica-Oblique", 6)
-    c.drawCentredString(width/2, 20, "Documento generado automáticamente - Sistema de Reportes de Fallas v1.0")
+    # Pie de página
+    c.setFont("Helvetica-Oblique", 7)
+    c.drawCentredString(width / 2, 20, "Documento generado automáticamente - Sistema de Reportes de Fallas v1.0")
 
     c.save()
     buffer.seek(0)
