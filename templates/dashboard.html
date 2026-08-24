@@ -30,7 +30,6 @@
         background: #fff;
         box-shadow: 0 4px 12px rgba(0,0,0,0.05);
         transition: transform 0.2s, box-shadow 0.2s;
-        cursor: pointer;
         text-decoration: none;
         color: #1e293b;
         display: block;
@@ -75,22 +74,35 @@
         border-left: 4px solid #f1c40f;
         padding-left: 1rem;
     }
+    .rol-badge {
+        background: var(--amarillo);
+        color: var(--negro);
+        font-weight: 700;
+        font-size: 0.6rem;
+        padding: 4px 8px;
+        border-radius: 20px;
+        text-transform: uppercase;
+    }
 </style>
 {% endblock %}
 
 {% block content %}
 <div class="container-fluid">
+    <!-- Banner de bienvenida -->
     <div class="welcome-banner">
         <div>
             <h1><i class="fas fa-hand-wave"></i> ¡Hola, {{ current_user.nombre_completo }}!</h1>
-            <p class="mt-2">Bienvenido al panel de administración de DATINVOZ. Resumen general del sistema.</p>
+            <p class="mt-2">Bienvenido al panel de administración de DATINVOZ.</p>
         </div>
         <div class="text-end">
-            <span class="rol-badge">{{ current_user.rol }}</span>
+            <span class="rol-badge">
+                {% if current_user.rol == 'admin' %}Admin{% elif current_user.rol == 'cor' %}COR{% else %}Técnico{% endif %}
+            </span>
             <div class="mt-2"><small class="text-muted">{{ now().strftime('%d/%m/%Y') }}</small></div>
         </div>
     </div>
 
+    <!-- Tarjetas de resumen -->
     <div class="row g-4 mb-4">
         <div class="col-md-3">
             <a href="/clientes" class="stat-card">
@@ -122,6 +134,35 @@
         </div>
     </div>
 
+    <!-- Usuarios COR en línea -->
+    <div class="card mb-4">
+        <div class="card-header"><i class="fas fa-user-clock"></i> Usuarios COR</div>
+        <div class="card-body">
+            <div id="usuarios-cor-online">Cargando...</div>
+            <script>
+            function actualizarUsuariosCor() {
+                fetch('/api/usuarios_cor_online')
+                    .then(r => r.json())
+                    .then(data => {
+                        let html = '<h6>En línea</h6><ul>';
+                        data.online.forEach(u => {
+                            html += `<li><span class="badge bg-success">●</span> ${u.nombre_completo}</li>`;
+                        });
+                        html += '</ul><h6>Desconectados</h6><ul>';
+                        data.offline.forEach(u => {
+                            html += `<li><span class="badge bg-secondary">●</span> ${u.nombre_completo}</li>`;
+                        });
+                        html += '</ul>';
+                        document.getElementById('usuarios-cor-online').innerHTML = html;
+                    });
+            }
+            actualizarUsuariosCor();
+            setInterval(actualizarUsuariosCor, 10000);
+            </script>
+        </div>
+    </div>
+
+    <!-- Accesos rápidos -->
     <div class="card mb-4">
         <div class="card-header"><span><i class="fas fa-bolt"></i> Accesos rápidos</span></div>
         <div class="card-body">
@@ -142,19 +183,8 @@
         </div>
     </div>
 
+    <!-- Administración -->
     <div class="row g-4">
-        <div class="col-lg-6">
-            <div class="card h-100">
-                <div class="card-header"><span><i class="fas fa-clock"></i> Actividad reciente</span></div>
-                <div class="card-body">
-                    <div class="recent-activity">
-                        <p class="mb-2"><i class="fas fa-check-circle text-success"></i> Sistema operativo correctamente.</p>
-                        <p class="mb-2"><i class="fas fa-info-circle text-info"></i> Los tickets se generan automáticamente con numeración.</p>
-                        <p class="mb-2"><i class="fas fa-database text-warning"></i> Recuerde realizar respaldos periódicos.</p>
-                    </div>
-                </div>
-            </div>
-        </div>
         <div class="col-lg-6">
             <div class="card h-100">
                 <div class="card-header"><span><i class="fas fa-cog"></i> Administración</span></div>
@@ -162,6 +192,10 @@
                     <ul class="list-group list-group-flush">
                         <li class="list-group-item d-flex justify-content-between align-items-center">
                             <a href="/admin/tecnicos">Técnicos</a>
+                            <span class="badge bg-primary">Gestionar</span>
+                        </li>
+                        <li class="list-group-item d-flex justify-content-between align-items-center">
+                            <a href="/admin/cor">Usuarios COR</a>
                             <span class="badge bg-primary">Gestionar</span>
                         </li>
                         <li class="list-group-item d-flex justify-content-between align-items-center">
@@ -173,6 +207,18 @@
                             <span class="badge bg-primary">Gestionar</span>
                         </li>
                     </ul>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-6">
+            <div class="card h-100">
+                <div class="card-header"><span><i class="fas fa-clock"></i> Actividad reciente</span></div>
+                <div class="card-body">
+                    <div class="recent-activity">
+                        <p class="mb-2"><i class="fas fa-check-circle text-success"></i> Sistema operativo correctamente.</p>
+                        <p class="mb-2"><i class="fas fa-info-circle text-info"></i> Los tickets se generan automáticamente con numeración.</p>
+                        <p class="mb-2"><i class="fas fa-database text-warning"></i> Recuerde realizar respaldos periódicos.</p>
+                    </div>
                 </div>
             </div>
         </div>

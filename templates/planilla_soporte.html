@@ -10,7 +10,7 @@
             <div class="card-body">
                 <form id="formGenerarPlanilla" method="POST" action="/planilla_soporte/generar_planilla">
                     
-                    <!-- Buscador de Ticket (opcional, puede dejarse en blanco si se selecciona un cliente manualmente) -->
+                    <!-- Buscador de Ticket (opcional) -->
                     <div class="mb-3 position-relative">
                         <label class="form-label">Buscar Ticket (opcional)</label>
                         <input type="text" id="buscarTicket" class="form-control" placeholder="Escriba número de ticket, cliente, etc..." autocomplete="off">
@@ -32,7 +32,13 @@
                     <!-- Resumen del ticket seleccionado -->
                     <div id="ticketResumen" class="alert alert-info mt-3" style="display: {% if ticket %}block{% else %}none{% endif %};">
                         <h6><i class="fas fa-info-circle"></i> Datos del Ticket</h6>
-                        <p><strong>Ticket:</strong> <span id="resumenTicketNum">{{ ticket.num_ticket if ticket else '' }}</span></p>
+                        <p><strong>Ticket:</strong> <span id="resumenTicketNum">
+                            {% if ticket %}
+                                {% if ticket.zona_inicial %}{{ ticket.zona_inicial }}-{% endif %}{{ ticket.num_ticket }}
+                            {% else %}
+                                
+                            {% endif %}
+                        </span></p>
                         <p><strong>Motivo:</strong> <span id="resumenMotivo">{{ ticket.motivo_ticket if ticket else '' }}</span></p>
                         <p><strong>Tipo Falla:</strong> <span id="resumenTipoFalla">{{ ticket.tipo_falla if ticket else '' }}</span></p>
                         <p><strong>Observaciones:</strong> <span id="resumenObservaciones">{{ ticket.observaciones if ticket else '' }}</span></p>
@@ -115,14 +121,12 @@ $(document).ready(function() {
     // FUNCIONES GLOBALES
     // ======================
     function mostrarCliente(cliente) {
-        // Actualizar campos ocultos y visibles
-        $('#cliente_id').val(cliente.id);
-        $('#buscarCliente').val(cliente.nombre || cliente.nombre_apellido || '');
-        $('#cliente_nombre_busqueda').val(cliente.nombre || cliente.nombre_apellido || '');
-        // Si hay ticket, actualizar resumen también (opcional)
+        if (!cliente) return;
+        $('#cliente_id').val(cliente.id || '');
+        $('#buscarCliente').val(cliente.nombre_apellido || cliente.nombre || '');
+        $('#cliente_nombre_busqueda').val(cliente.nombre_apellido || cliente.nombre || '');
         if ($('#ticket_id').val()) {
-            // No sobrescribimos el resumen del ticket, solo actualizamos cliente
-            $('#resumenCliente').text(cliente.nombre || cliente.nombre_apellido || '');
+            $('#resumenCliente').text(cliente.nombre_apellido || cliente.nombre || '');
         }
     }
 
@@ -151,8 +155,9 @@ $(document).ready(function() {
                     html = '<div class="list-group-item text-muted">No se encontraron tickets</div>';
                 } else {
                     data.forEach(function(t) {
+                        var display = t.ticket_display || t.num_ticket;
                         html += '<a href="#" class="list-group-item list-group-item-action ticket-item" data-id="'+t.id+'">';
-                        html += '<strong>'+t.num_ticket+'</strong> - '+t.cliente+' - '+t.status;
+                        html += '<strong>'+display+'</strong> - '+t.cliente+' - '+t.status;
                         html += '</a>';
                     });
                 }
@@ -175,39 +180,51 @@ $(document).ready(function() {
     });
 
     function cargarDatosTicket(ticketId) {
-        $.get('/api/ticket/' + ticketId, function(response) {
-            var ticket = response.ticket;
-            var cliente = response.cliente;
-            var tecnico = response.tecnico;
+        $.get('/api/ticket/' + ticketId)
+            .done(function(response) {
+                var ticket = response.ticket;
+                if (!ticket) return;
 
-            // Guardar ticket_id
-            $('#ticket_id').val(ticket.id);
+                $('#ticket_id').val(ticket.id);
+                var zona = ticket.zona_inicial || '';
+                var numero = ticket.num_ticket || '';
+                var display = zona ? zona + '-' + numero : numero;
+                $('#resumenTicketNum').text(display);
+                $('#buscarTicket').val(display);
 
-            // Actualizar resumen
-            $('#resumenTicketNum').text(ticket.num_ticket || '');
-            $('#resumenMotivo').text(ticket.motivo_ticket || '');
-            $('#resumenTipoFalla').text(ticket.tipo_falla || '');
-            $('#resumenObservaciones').text(ticket.observaciones || '');
-            $('#resumenCliente').text(ticket.cliente || '');
-            if (tecnico) {
-                $('#resumenTecnico').text(tecnico.nombre_completo);
-            } else {
-                $('#resumenTecnico').text(ticket.responsable || 'No asignado');
-            }
-            $('#ticketResumen').show();
+                $('#resumenMotivo').text(ticket.motivo_ticket || '');
+                $('#resumenTipoFalla').text(ticket.tipo_falla || '');
+                $('#resumenObservaciones').text(ticket.observaciones || '');
+                $('#resumenCliente').text(ticket.cliente || '');
+                $('#resumenTecnico').text(ticket.tecnico_nombre || ticket.responsable || 'No asignado');
+                $('#ticketResumen').show();
 
-            // Autocompletar cliente si existe en BD, si no usar el nombre del ticket
-            if (cliente) {
-                mostrarCliente(cliente);
-            } else {
-                // Si no hay cliente en BD, ponemos el nombre del ticket
-                $('#cliente_id').val('');
-                $('#buscarCliente').val(ticket.cliente || '');
-                $('#cliente_nombre_busqueda').val(ticket.cliente || '');
-            }
-        }).fail(function() {
-            alert('Error al cargar los datos del ticket.');
-        });
+                // Cargar cliente desde el ticket si existe
+                if (ticket.cor_nombre) {
+                    // Es un usuario COR, no hay cliente separado
+                    $('#cliente_id').val('');
+                    $('#buscarCliente').val(ticket.cliente || '');
+                    $('#cliente_nombre_busqueda').val(ticket.cliente || '');
+                } else {
+                    // Intentar cargar cliente por nombre
+                    if (ticket.cliente) {
+                        $.get('/api/buscar_cliente_json', { q: ticket.cliente })
+                            .done(function(clientes) {
+                                if (clientes.length > 0) {
+                                    mostrarCliente(clientes[0]);
+                                } else {
+                                    $('#cliente_id').val('');
+                                    $('#buscarCliente').val(ticket.cliente || '');
+                                    $('#cliente_nombre_busqueda').val(ticket.cliente || '');
+                                }
+                            });
+                    }
+                }
+            })
+            .fail(function() {
+                // No mostrar alerta, solo limpiar
+                console.log('No se pudo cargar el ticket');
+            });
     }
 
     // ======================
@@ -287,7 +304,6 @@ $(document).ready(function() {
     // ======================
     {% if ticket %}
         cargarDatosTicket({{ ticket.id }});
-        $('#buscarTicket').val('{{ ticket.num_ticket }}');
     {% endif %}
 
     // ======================

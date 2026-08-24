@@ -12,7 +12,7 @@
                 <input type="text" name="username" class="form-control" required>
             </div>
             <div class="col-md-3">
-                <label class="form-label">Nombre Completo *</label>
+                <label class="form-label">Nombre Completo</label>
                 <input type="text" name="nombre_completo" class="form-control" required>
             </div>
             <div class="col-md-3">
@@ -42,7 +42,6 @@
                         <th>Nombre Completo</th>
                         <th>Cédula</th>
                         <th>Teléfono</th>
-                        <th>Online</th>
                         <th>Acciones</th>
                     </tr>
                 </thead>
@@ -55,16 +54,19 @@
                         <td>{{ t.cedula or '<span class="badge-empty">Campo vacío</span>'|safe }}</td>
                         <td>{{ t.telefono or '<span class="badge-empty">Campo vacío</span>'|safe }}</td>
                         <td>
-                            {% if t.online == 1 %}
-                                <span class="badge badge-success">En línea</span>
-                            {% else %}
-                                <span class="badge badge-secondary">Desconectado</span>
-                            {% endif %}
-                        </td>
-                        <td>
-                            <form method="POST" action="/admin/tecnico/{{ t.id }}/eliminar" onsubmit="return confirm('¿Eliminar este técnico?')">
-                                <button type="submit" class="btn btn-sm btn-danger"><i class="fas fa-trash"></i></button>
-                            </form>
+                            <div class="btn-group" role="group">
+                                <button type="button" class="btn btn-sm btn-outline-primary btn-editar"
+                                        data-id="{{ t.id }}"
+                                        data-username="{{ t.username }}"
+                                        data-nombre="{{ t.nombre_completo }}"
+                                        data-cedula="{{ t.cedula or '' }}"
+                                        data-telefono="{{ t.telefono or '' }}">
+                                    <i class="fas fa-edit"></i>
+                                </button>
+                                <form method="POST" action="/admin/tecnico/{{ t.id }}/eliminar" onsubmit="return confirm('¿Eliminar este técnico?')" style="display:inline;">
+                                    <button type="submit" class="btn btn-sm btn-danger"><i class="fas fa-trash"></i></button>
+                                </form>
+                            </div>
                         </td>
                     </tr>
                     {% endfor %}
@@ -73,4 +75,68 @@
         </div>
     </div>
 </div>
+
+<!-- Modal para editar técnico -->
+<div class="modal fade" id="modalEditarTecnico" tabindex="-1" aria-labelledby="modalEditarLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form id="formEditarTecnico" method="POST" action="">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="modalEditarLabel">Editar Técnico</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Técnico</label>
+                        <input type="text" name="username" id="edit_username" class="form-control" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Nombre Completo</label>
+                        <input type="text" name="nombre_completo" id="edit_nombre" class="form-control" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Cédula</label>
+                        <input type="text" name="cedula" id="edit_cedula" class="form-control">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Teléfono</label>
+                        <input type="text" name="telefono" id="edit_telefono" class="form-control">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="submit" class="btn btn-amarillo"><i class="fas fa-save"></i> Guardar cambios</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const modal = new bootstrap.Modal(document.getElementById('modalEditarTecnico'));
+    const form = document.getElementById('formEditarTecnico');
+
+    document.querySelectorAll('.btn-editar').forEach(btn => {
+        btn.addEventListener('click', function() {
+            const id = this.dataset.id;
+            const username = this.dataset.username;
+            const nombre = this.dataset.nombre;
+            const cedula = this.dataset.cedula;
+            const telefono = this.dataset.telefono;
+
+            // Llenar formulario
+            document.getElementById('edit_username').value = username;
+            document.getElementById('edit_nombre').value = nombre;
+            document.getElementById('edit_cedula').value = cedula;
+            document.getElementById('edit_telefono').value = telefono;
+
+            // Establecer acción del formulario
+            form.action = '/admin/tecnico/editar/' + id;
+
+            modal.show();
+        });
+    });
+});
+</script>
 {% endblock %}

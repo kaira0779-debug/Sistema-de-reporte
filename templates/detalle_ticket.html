@@ -1,44 +1,92 @@
 {% extends "base.html" %}
-{% block title %}Detalle de Ticket{% endblock %}
-{% block heading %}Ticket {{ ticket.num_ticket }}{% endblock %}
-{% block breadcrumb %}Información del ticket{% endblock %}
+{% block title %}Detalle Ticket{% endblock %}
+{% block heading %}Detalle Ticket{% endblock %}
 
 {% block content %}
-<div class="row justify-content-center">
-    <div class="col-lg-8">
-        <div class="card">
-            <div class="card-header d-flex justify-content-between align-items-center">
-                <span><i class="fas fa-ticket-alt me-2" style="color: var(--primary);"></i> Detalle del Ticket</span>
-                <div>
-                    <a href="{{ url_for('editar_ticket', ticket_id=ticket.id) }}" class="btn btn-sm btn-amarillo">
-                        <i class="fas fa-edit"></i> Editar
-                    </a>
-                    <form method="POST" action="{{ url_for('eliminar_ticket', ticket_id=ticket.id) }}" style="display:inline;" onsubmit="return confirm('¿Eliminar este ticket?')">
-                        <button type="submit" class="btn btn-sm btn-outline-danger"><i class="fas fa-trash-alt"></i> Eliminar</button>
-                    </form>
-                </div>
+<div class="card">
+    <div class="card-header">
+        <i class="fas fa-ticket-alt"></i> Ticket {{ ticket.num_ticket }}
+        <div class="float-end">
+            <a href="/ticket/{{ ticket.id }}/editar" class="btn btn-sm btn-success"><i class="fas fa-edit"></i> Editar</a>
+            <a href="/planilla_soporte?ticket_id={{ ticket.id }}" class="btn btn-sm btn-amarillo"><i class="fas fa-file-pdf"></i> Planilla</a>
+        </div>
+    </div>
+    <div class="card-body">
+        <div class="row">
+            <div class="col-md-6">
+                <h5>Información del Ticket</h5>
+                <table class="table table-bordered">
+                    <tr>
+                        <th>Número</th>
+                        <td>
+                            {% if ticket.zona_inicial %}
+                                {{ ticket.zona_inicial }}-{{ ticket.num_ticket }}
+                            {% else %}
+                                {{ ticket.num_ticket }}
+                            {% endif %}
+                        </td>
+                    </tr>
+                    <tr>
+                        <th>Fecha</th>
+                        <td>{{ ticket.fecha.strftime('%d/%m/%Y') if ticket.fecha else '' }}</td>
+                    </tr>
+                    <tr>
+                        <th>Nodo</th>
+                        <td>{{ ticket.nodo or 'Sin nodo' }}</td>
+                    </tr>
+                    <tr>
+                        <th>Zona</th>
+                        <td>
+                            {% if ticket.zona_inicial == 'C' %}Caracas
+                            {% elif ticket.zona_inicial == 'G' %}Guatire-Guarenas
+                            {% elif ticket.zona_inicial == 'CH' %}Chuspa
+                            {% else %}Desconocida{% endif %}
+                        </td>
+                    </tr>
+                    <tr>
+                        <th>Cliente</th>
+                        <td>{{ ticket.cliente }}</td>
+                    </tr>
+                    <tr>
+                        <th>Motivo</th>
+                        <td>{{ ticket.motivo_ticket or '—' }}</td>
+                    </tr>
+                    <tr>
+                        <th>Tipo de Falla</th>
+                        <td>{{ ticket.tipo_falla or '—' }}</td>
+                    </tr>
+                    <tr>
+                        <th>Visita Técnica</th>
+                        <td>{{ ticket.visita_tecnica or '—' }}</td>
+                    </tr>
+                    <tr>
+                        <th>Status</th>
+                        <td>
+                            <span class="badge {% if ticket.status == 'Pendiente' %}badge-warning{% elif ticket.status == 'En proceso' %}badge-info{% elif ticket.status == 'Resuelto' %}badge-success{% else %}badge-danger{% endif %}">
+                                {{ ticket.status }}
+                            </span>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th>Responsable</th>
+                        <td>{{ ticket.responsable_display or '—' }}</td>
+                    </tr>
+                    <tr>
+                        <th>Técnico Asignado</th>
+                        <td>
+                            {% if ticket.tecnico_nombre %}
+                                {{ ticket.tecnico_nombre }}
+                                (C.I: {{ ticket.tecnico_cedula or 'N/A' }}, Tel: {{ ticket.tecnico_telefono or 'N/A' }})
+                            {% else %}
+                                —
+                            {% endif %}
+                        </td>
+                    </tr>
+                </table>
             </div>
-            <div class="card-body">
-                <div class="row mb-3">
-                    <div class="col-md-6">
-                        <p><strong>N° Ticket:</strong> {{ ticket.num_ticket }}</p>
-                        <p><strong>Fecha:</strong> {{ ticket.fecha.strftime('%d/%m/%Y') if ticket.fecha else '' }}</p>
-                        <p><strong>Cliente:</strong> {{ ticket.cliente }}</p>
-                        <p><strong>Nodo:</strong> {{ ticket.nodo or '—' }}</p>
-                    </div>
-                    <div class="col-md-6">
-                        <p><strong>Motivo:</strong> {{ ticket.motivo_ticket or '—' }}</p>
-                        <p><strong>Visita Técnica:</strong> {{ ticket.visita_tecnica or '—' }}</p>
-                        <p><strong>Tipo de Falla:</strong> {{ ticket.tipo_falla or '—' }}</p>
-                        <p><strong>Status:</strong> {{ ticket.status or '—' }}</p>
-                    </div>
-                </div>
-                <div class="mb-3">
-                    <p><strong>Responsable:</strong> {{ ticket.responsable or '—' }}</p>
-                    <p><strong>Observaciones:</strong></p>
-                    <div class="p-3 bg-light rounded">{{ ticket.observaciones or 'Sin observaciones' }}</div>
-                </div>
-                <a href="{{ url_for('tickets') }}" class="btn btn-secondary"><i class="fas fa-arrow-left"></i> Volver a lista</a>
+            <div class="col-md-6">
+                <h5>Observaciones</h5>
+                <p class="border p-3 bg-light rounded">{{ ticket.observaciones or 'Sin observaciones' }}</p>
             </div>
         </div>
     </div>

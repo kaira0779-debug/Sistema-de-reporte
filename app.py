@@ -92,15 +92,32 @@ class User(UserMixin):
         self.rol = rol
         self.online = online
 
+    def get_id(self):
+        # Prefijo para evitar colisiones entre tablas
+        return f"{self.rol}-{self.id}"
+
 @login_manager.user_loader
 def load_user(user_id):
+    # user_id tiene formato "rol-id"
+    try:
+        rol, id_str = user_id.split('-', 1)
+        id_int = int(id_str)
+    except (ValueError, AttributeError):
+        return None
+
     conn = get_db()
     cur = conn.cursor()
-    cur.execute("SELECT id, username, nombre_completo, rol, online FROM trabajadores WHERE id = %s", (user_id,))
-    user = cur.fetchone()
+    if rol == 'cor':
+        cur.execute("SELECT id, username, password_hash, nombre_completo FROM usuarios_cor WHERE id = %s", (id_int,))
+        user = cur.fetchone()
+        if user:
+            return User(user['id'], user['username'], user['nombre_completo'], 'cor', 0)
+    elif rol == 'admin':
+        cur.execute("SELECT id, username, nombre_completo, rol, online FROM trabajadores WHERE id = %s AND rol = 'admin'", (id_int,))
+        user = cur.fetchone()
+        if user:
+            return User(user['id'], user['username'], user['nombre_completo'], user['rol'], user['online'])
     cur.close()
-    if user:
-        return User(user['id'], user['username'], user['nombre_completo'], user['rol'], user['online'])
     return None
 
 @app.before_request
@@ -108,7 +125,10 @@ def update_online():
     if current_user.is_authenticated:
         conn = get_db()
         cur = conn.cursor()
-        cur.execute("UPDATE trabajadores SET online = 1, ultima_actividad = NOW() WHERE id = %s", (current_user.id,))
+        if current_user.rol == 'cor':
+            cur.execute("UPDATE usuarios_cor SET online = 1, ultima_actividad = NOW() WHERE id = %s", (current_user.id,))
+        else:
+            cur.execute("UPDATE trabajadores SET online = 1, ultima_actividad = NOW() WHERE id = %s", (current_user.id,))
         conn.commit()
         cur.close()
 
@@ -117,12 +137,27 @@ def inject_user():
     return dict(current_user=current_user, now=datetime.now)
 
 # ============================================================
-#   CREAR ADMIN Y COLUMNAS SI NO EXISTEN
+#   CREAR TABLAS Y ADMIN SI NO EXISTEN
 # ============================================================
 def crear_admin_si_no_existe():
     conn = get_db()
     cur = conn.cursor()
 
+    # Tabla usuarios_cor si no existe
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS usuarios_cor (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            username VARCHAR(50) NOT NULL UNIQUE,
+            password_hash VARCHAR(255) NOT NULL,
+            nombre_completo VARCHAR(100) NOT NULL,
+            online TINYINT(1) DEFAULT 0,
+            ultima_actividad DATETIME NULL,
+            creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """)
+    conn.commit()
+
+    # Columnas en trabajadores
     columnas_requeridas_trab = {
         'telefono': "ALTER TABLE trabajadores ADD COLUMN telefono VARCHAR(20) NULL AFTER cedula",
         'ultima_actividad': "ALTER TABLE trabajadores ADD COLUMN ultima_actividad DATETIME NULL AFTER online"
@@ -133,6 +168,7 @@ def crear_admin_si_no_existe():
             cur.execute(ddl)
             conn.commit()
 
+    # Columnas en clientes
     columnas_requeridas_clientes = {
         'nodo': "ALTER TABLE clientes ADD COLUMN nodo VARCHAR(100) NULL AFTER direccion_servicio",
         'mbps_contratados': "ALTER TABLE clientes ADD COLUMN mbps_contratados VARCHAR(50) NULL AFTER nodo"
@@ -146,6 +182,7 @@ def crear_admin_si_no_existe():
             except Exception as e:
                 print(f"No se pudo agregar columna {col} a clientes: {e}")
 
+    # Columna tecnico_id y cor_id en tickets
     cur.execute("SHOW COLUMNS FROM tickets LIKE 'tecnico_id'")
     if not cur.fetchone():
         try:
@@ -154,6 +191,15 @@ def crear_admin_si_no_existe():
         except Exception as e:
             print(f"No se pudo agregar columna tecnico_id a tickets: {e}")
 
+    cur.execute("SHOW COLUMNS FROM tickets LIKE 'cor_id'")
+    if not cur.fetchone():
+        try:
+            cur.execute("ALTER TABLE tickets ADD COLUMN cor_id INT NULL AFTER responsable")
+            conn.commit()
+        except Exception as e:
+            print(f"No se pudo agregar columna cor_id a tickets: {e}")
+
+    # Crear admin si no existe
     cur.execute("SELECT id FROM trabajadores WHERE username = 'admin'")
     if not cur.fetchone():
         hashed = bcrypt.hashpw(b'Admin123*', bcrypt.gensalt()).decode('utf-8')
@@ -372,7 +418,18 @@ def leer_archivo_datos(filepath, extension):
         try:
             hoja = wb.active
             filas = list(hoja.iter_rows(values_only=True))
-            datos = [[str(cell).strip() if cell is not None else '' for cell in row] for row in filas if any(cell for cell in row)]
+            datos = []
+            for row in filas:
+                if any(cell is not None for cell in row):
+                    fila = []
+                    for cell in row:
+                        if cell is None:
+                            fila.append('')
+                        elif isinstance(cell, datetime):
+                            fila.append(cell)  # Mantener datetime
+                        else:
+                            fila.append(str(cell).strip())
+                    datos.append(fila)
             return datos
         finally:
             wb.close()
@@ -472,39 +529,93 @@ def procesar_fila_datos(fila, mapeo, tipo):
     return datos
 
 # ============================================================
+#   IDENTIFICACIÓN DE ZONA POR NODO
+# ============================================================
+NODOS_GUATIRE_GUARENAS = {
+    'APAMATES', 'ARAIRA', 'BARRIO SOJO', 'BUENAVENTURA SUITES', 'CANAIMA',
+    'DORAL', 'EL INGENIO', 'HUMBOLDT', 'IZCARAGUA',
+    'LA ESPERANZA', 'LA PARADA', 'LA SABANA', 'LA VILLA', 'LAS ACACIAS',
+    'LOMAS DE ARAIRA', 'LOS NARANJOS', 'MARGARITA', 'MENCA', 'NARANJOS',
+    'OROPEZA', 'PADRE SOJO', 'PARQUE HABITAD', 'REFUGIO',
+    'SAN MARTIN DE PORRRA', 'TERRINCA', 'VAQUERA', 'VILLA AVILA',
+    'VILLA GPON', 'LA VAQUERA', 'SAN MARTIN DE PORRAS'
+}
+
+NODOS_CARACAS = {
+    'Acuario', 'Valle Abajo', 'MARCONI', 'Torre centro Boyaca', 'SAMANES',
+    'Vista Alegre', 'El Valle - San Antonio', 'SANTA FE', 'Venevision',
+    'El Tope', 'Petare', 'Senderos', 'Ciudad Tiuna', 'Torre Domus',
+    'Plaza las Americas', 'Naranjos', 'Torre Britanica',
+    'MACARACUAY', 'Palo Verde', 'ALAMEDA', 'BORDE QUINTA', 'VNET',
+    'LOS TEQUES'
+}
+
+NODOS_CHUSPA = {
+    'Chuspa'
+}
+
+NODOS_GUATIRE_GUARENAS_NORM = {normalizar_texto(n) for n in NODOS_GUATIRE_GUARENAS}
+NODOS_CARACAS_NORM = {normalizar_texto(n) for n in NODOS_CARACAS}
+NODOS_CHUSPA_NORM = {normalizar_texto(n) for n in NODOS_CHUSPA}
+
+def determinar_zona(nodo):
+    """Determina la zona: 'G' (Guatire-Guarenas), 'C' (Caracas), 'CH' (Chuspa) o '' si no hay nodo o es desconocido."""
+    if not nodo:
+        return ''
+    nodo_norm = normalizar_texto(nodo)
+    if nodo_norm in NODOS_CHUSPA_NORM:
+        return 'CH'
+    elif nodo_norm in NODOS_GUATIRE_GUARENAS_NORM:
+        return 'G'
+    elif nodo_norm in NODOS_CARACAS_NORM:
+        return 'C'
+    else:
+        if 'chusp' in nodo_norm:
+            return 'CH'
+        elif 'guatire' in nodo_norm or 'guarenas' in nodo_norm:
+            return 'G'
+        elif 'caracas' in nodo_norm or 'ccs' in nodo_norm:
+            return 'C'
+        return ''
+
+# ============================================================
 #                           RUTAS
 # ============================================================
 @app.route('/')
 def index():
     if current_user.is_authenticated:
-        if current_user.rol == 'admin':
+        if current_user.rol in ('admin', 'cor'):
             return redirect(url_for('dashboard'))
-        else:
-            return redirect(url_for('panel_tecnico'))
     return redirect(url_for('login'))
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if current_user.is_authenticated:
-        if current_user.rol == 'admin':
+        if current_user.rol in ('admin', 'cor'):
             return redirect(url_for('dashboard'))
-        else:
-            return redirect(url_for('panel_tecnico'))
     if request.method == 'POST':
         username = request.form['username']
         password = request.form['password'].encode('utf-8')
         conn = get_db()
         cur = conn.cursor()
-        cur.execute("SELECT id, username, password_hash, nombre_completo, rol FROM trabajadores WHERE username = %s", (username,))
+
+        # Buscar en usuarios_cor primero
+        cur.execute("SELECT id, username, password_hash, nombre_completo FROM usuarios_cor WHERE username = %s", (username,))
+        user = cur.fetchone()
+        if user and bcrypt.checkpw(password, user['password_hash'].encode('utf-8')):
+            cur.close()
+            user_obj = User(user['id'], user['username'], user['nombre_completo'], 'cor', True)
+            login_user(user_obj)
+            return redirect(url_for('dashboard'))
+
+        # Buscar en trabajadores (solo admin)
+        cur.execute("SELECT id, username, password_hash, nombre_completo, rol FROM trabajadores WHERE username = %s AND rol = 'admin'", (username,))
         user = cur.fetchone()
         cur.close()
         if user and bcrypt.checkpw(password, user['password_hash'].encode('utf-8')):
-            user_obj = User(user['id'], user['username'], user['nombre_completo'], user['rol'], True)
+            user_obj = User(user['id'], user['username'], user['nombre_completo'], 'admin', True)
             login_user(user_obj)
-            if user['rol'] == 'admin':
-                return redirect(url_for('dashboard'))
-            else:
-                return redirect(url_for('panel_tecnico'))
+            return redirect(url_for('dashboard'))
         else:
             flash('Credenciales inválidas', 'danger')
     return render_template('login.html')
@@ -514,7 +625,10 @@ def login():
 def logout():
     conn = get_db()
     cur = conn.cursor()
-    cur.execute("UPDATE trabajadores SET online = 0, ultima_actividad = NULL WHERE id = %s", (current_user.id,))
+    if current_user.rol == 'cor':
+        cur.execute("UPDATE usuarios_cor SET online = 0, ultima_actividad = NULL WHERE id = %s", (current_user.id,))
+    else:
+        cur.execute("UPDATE trabajadores SET online = 0, ultima_actividad = NULL WHERE id = %s", (current_user.id,))
     conn.commit()
     cur.close()
     logout_user()
@@ -523,8 +637,9 @@ def logout():
 @app.route('/dashboard')
 @login_required
 def dashboard():
-    if current_user.rol != 'admin':
-        return redirect(url_for('panel_tecnico'))
+    if current_user.rol not in ('admin', 'cor'):
+        flash('Acceso denegado', 'danger')
+        return redirect(url_for('login'))
     conn = get_db()
     cur = conn.cursor()
     cur.execute("SELECT COUNT(*) as total FROM trabajadores WHERE rol = 'tecnico'")
@@ -537,32 +652,127 @@ def dashboard():
     return render_template('dashboard.html', total_tecnicos=total_tecnicos, total_clientes=total_clientes, total_tickets=total_tickets)
 
 # ============================================================
-#   PANEL DEL TÉCNICO
+#   USUARIOS DEL COR
 # ============================================================
-@app.route('/panel_tecnico')
+@app.route('/admin/cor', methods=['GET', 'POST'])
 @login_required
-def panel_tecnico():
-    if current_user.rol != 'tecnico':
+def admin_cor():
+    if current_user.rol not in ('admin', 'cor'):
+        flash('Acceso denegado', 'danger')
+        return redirect(url_for('dashboard'))
+
+    conn = get_db()
+    cur = conn.cursor()
+    if request.method == 'POST':
+        username = request.form.get('username', '').strip()
+        nombre_completo = request.form.get('nombre_completo', '').strip()
+        password = request.form.get('password', '').strip()
+
+        if not username or not nombre_completo or not password:
+            flash('Usuario, nombre y contraseña son obligatorios', 'danger')
+            return redirect(url_for('admin_cor'))
+
+        try:
+            cur.execute("SELECT id FROM usuarios_cor WHERE username = %s", (username,))
+            if cur.fetchone():
+                flash('El nombre de usuario ya existe', 'danger')
+                return redirect(url_for('admin_cor'))
+            hashed = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+            cur.execute("INSERT INTO usuarios_cor (username, password_hash, nombre_completo, online) VALUES (%s,%s,%s,0)",
+                        (username, hashed, nombre_completo))
+            conn.commit()
+            flash('Usuario del COR registrado correctamente', 'success')
+        except Exception as e:
+            flash(f'Error: {str(e)}', 'danger')
+        finally:
+            cur.close()
+        return redirect(url_for('admin_cor'))
+
+    # GET: listar usuarios COR
+    cur.execute("SELECT id, username, nombre_completo, online, ultima_actividad FROM usuarios_cor ORDER BY creado_en DESC")
+    usuarios = cur.fetchall()
+    cur.close()
+    return render_template('admin_cor.html', usuarios=usuarios)
+
+@app.route('/admin/cor/editar/<int:id>', methods=['POST'])
+@login_required
+def editar_cor(id):
+    if current_user.rol not in ('admin', 'cor'):
+        flash('Acceso denegado', 'danger')
+        return redirect(url_for('dashboard'))
+
+    username = request.form.get('username', '').strip()
+    nombre_completo = request.form.get('nombre_completo', '').strip()
+    password = request.form.get('password', '').strip()
+
+    if not username or not nombre_completo:
+        flash('Usuario y nombre son obligatorios', 'danger')
+        return redirect(url_for('admin_cor'))
+
+    conn = get_db()
+    cur = conn.cursor()
+    try:
+        if password:
+            hashed = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+            cur.execute("UPDATE usuarios_cor SET username=%s, nombre_completo=%s, password_hash=%s WHERE id=%s",
+                        (username, nombre_completo, hashed, id))
+        else:
+            cur.execute("UPDATE usuarios_cor SET username=%s, nombre_completo=%s WHERE id=%s",
+                        (username, nombre_completo, id))
+        conn.commit()
+        flash('Usuario del COR actualizado correctamente', 'success')
+    except Exception as e:
+        flash(f'Error: {str(e)}', 'danger')
+    finally:
+        cur.close()
+    return redirect(url_for('admin_cor'))
+
+@app.route('/admin/cor/eliminar/<int:id>', methods=['POST'])
+@login_required
+def eliminar_cor(id):
+    if current_user.rol not in ('admin', 'cor'):
         flash('Acceso denegado', 'danger')
         return redirect(url_for('dashboard'))
     conn = get_db()
     cur = conn.cursor()
-    cur.execute("""
-        SELECT t.*, tec.nombre_completo as tecnico_nombre
-        FROM tickets t
-        LEFT JOIN trabajadores tec ON t.tecnico_id = tec.id
-        WHERE t.tecnico_id = %s
-        ORDER BY t.fecha DESC, t.num_ticket DESC
-    """, (current_user.id,))
-    tickets = cur.fetchall()
+    cur.execute("DELETE FROM usuarios_cor WHERE id = %s", (id,))
+    conn.commit()
     cur.close()
-    return render_template('panel_tecnico.html', tickets=tickets)
+    flash('Usuario del COR eliminado', 'success')
+    return redirect(url_for('admin_cor'))
+
+# ============================================================
+#   API USUARIOS COR EN LÍNEA
+# ============================================================
+@app.route('/api/usuarios_cor_online')
+@login_required
+def api_usuarios_cor_online():
+    if current_user.rol not in ('admin', 'cor'):
+        return jsonify({'error': 'Acceso denegado'}), 403
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT id, username, nombre_completo, online, ultima_actividad
+        FROM usuarios_cor
+        WHERE online = 1 AND ultima_actividad > DATE_SUB(NOW(), INTERVAL 5 MINUTE)
+        ORDER BY nombre_completo
+    """)
+    online = cur.fetchall()
+    cur.execute("""
+        SELECT id, username, nombre_completo, online, ultima_actividad
+        FROM usuarios_cor
+        WHERE online = 0 OR ultima_actividad IS NULL OR ultima_actividad <= DATE_SUB(NOW(), INTERVAL 5 MINUTE)
+        ORDER BY nombre_completo
+    """)
+    offline = cur.fetchall()
+    cur.close()
+    return jsonify({'online': online, 'offline': offline})
 
 # ---------- CLIENTES ----------
 @app.route('/clientes')
 @login_required
 def clientes():
-    if current_user.rol != 'admin':
+    if current_user.rol not in ('admin', 'cor'):
         flash('Acceso denegado', 'danger')
         return redirect(url_for('dashboard'))
     conn = get_db()
@@ -577,7 +787,7 @@ def clientes():
 @app.route('/preview_import', methods=['POST'])
 @login_required
 def preview_import():
-    if current_user.rol != 'admin':
+    if current_user.rol not in ('admin', 'cor'):
         return jsonify({'error': 'Acceso denegado'}), 403
     archivo = request.files['archivo']
     if not archivo:
@@ -619,7 +829,7 @@ def preview_import():
 @app.route('/cargar_clientes', methods=['GET', 'POST'])
 @login_required
 def cargar_clientes():
-    if current_user.rol != 'admin':
+    if current_user.rol not in ('admin', 'cor'):
         flash('Acceso denegado', 'danger')
         return redirect(url_for('dashboard'))
     if request.method == 'POST':
@@ -680,7 +890,7 @@ def cargar_clientes():
 @app.route('/agregar_cliente', methods=['POST'])
 @login_required
 def agregar_cliente():
-    if current_user.rol != 'admin':
+    if current_user.rol not in ('admin', 'cor'):
         flash('Acceso denegado', 'danger')
         return redirect(url_for('dashboard'))
     datos = {
@@ -705,7 +915,7 @@ def agregar_cliente():
 @app.route('/cliente/<int:cliente_id>/editar', methods=['GET', 'POST'])
 @login_required
 def editar_cliente(cliente_id):
-    if current_user.rol != 'admin':
+    if current_user.rol not in ('admin', 'cor'):
         flash('Acceso denegado', 'danger')
         return redirect(url_for('dashboard'))
     conn = get_db()
@@ -745,7 +955,7 @@ def editar_cliente(cliente_id):
 @app.route('/cliente/<int:cliente_id>/eliminar', methods=['POST'])
 @login_required
 def eliminar_cliente(cliente_id):
-    if current_user.rol != 'admin':
+    if current_user.rol not in ('admin', 'cor'):
         flash('Acceso denegado', 'danger')
         return redirect(url_for('dashboard'))
     conn = get_db()
@@ -760,7 +970,7 @@ def eliminar_cliente(cliente_id):
 @app.route('/cliente/<int:cliente_id>')
 @login_required
 def detalle_cliente(cliente_id):
-    if current_user.rol != 'admin':
+    if current_user.rol not in ('admin', 'cor'):
         flash('Acceso denegado', 'danger')
         return redirect(url_for('dashboard'))
     conn = get_db()
@@ -777,16 +987,23 @@ def detalle_cliente(cliente_id):
 @app.route('/tickets')
 @login_required
 def tickets():
+    if current_user.rol not in ('admin', 'cor'):
+        flash('Acceso denegado', 'danger')
+        return redirect(url_for('dashboard'))
     conn = get_db()
     cur = conn.cursor()
     cur.execute("""
-        SELECT t.*, tec.nombre_completo as tecnico_nombre
+        SELECT t.*, tec.nombre_completo as tecnico_nombre, uc.nombre_completo as cor_nombre
         FROM tickets t
         LEFT JOIN trabajadores tec ON t.tecnico_id = tec.id
+        LEFT JOIN usuarios_cor uc ON t.cor_id = uc.id
         ORDER BY t.fecha DESC, t.num_ticket DESC
         LIMIT 500
     """)
     tickets = cur.fetchall()
+    for t in tickets:
+        t['zona_inicial'] = determinar_zona(t.get('nodo', ''))
+        t['responsable_display'] = t.get('cor_nombre') or t.get('responsable') or ''
 
     cur.execute("SELECT DISTINCT nodo FROM clientes WHERE nodo IS NOT NULL AND nodo != '' UNION SELECT DISTINCT nodo FROM tickets WHERE nodo IS NOT NULL AND nodo != '' ORDER BY nodo")
     nodos = [row['nodo'] for row in cur.fetchall()]
@@ -800,8 +1017,11 @@ def tickets():
     cur.execute("SELECT id, nombre_completo, cedula, telefono FROM trabajadores WHERE rol = 'tecnico' ORDER BY nombre_completo")
     tecnicos = cur.fetchall()
 
+    cur.execute("SELECT id, nombre_completo FROM usuarios_cor ORDER BY nombre_completo")
+    usuarios_cor = cur.fetchall()
+
     cur.close()
-    return render_template('tickets.html', tickets=tickets, nodos=nodos, motivos=motivos, tipos_falla=tipos_falla, tecnicos=tecnicos)
+    return render_template('tickets.html', tickets=tickets, nodos=nodos, motivos=motivos, tipos_falla=tipos_falla, tecnicos=tecnicos, usuarios_cor=usuarios_cor)
 
 @app.route('/api/buscar_tickets_json')
 @login_required
@@ -809,23 +1029,43 @@ def api_buscar_tickets():
     q = request.args.get('q', '').strip()
     conn = get_db()
     cur = conn.cursor()
+
+    sql = """
+        SELECT t.*, tec.nombre_completo as tecnico_nombre, uc.nombre_completo as cor_nombre
+        FROM tickets t
+        LEFT JOIN trabajadores tec ON t.tecnico_id = tec.id
+        LEFT JOIN usuarios_cor uc ON t.cor_id = uc.id
+    """
+    params = []
     if q:
-        like = f'%{q}%'
-        cur.execute("""
-            SELECT * FROM tickets 
-            WHERE num_ticket LIKE %s OR cliente LIKE %s OR nodo LIKE %s 
-               OR motivo_ticket LIKE %s OR tipo_falla LIKE %s OR status LIKE %s 
-               OR responsable LIKE %s OR observaciones LIKE %s
-            ORDER BY fecha DESC, num_ticket DESC 
-            LIMIT 50
-        """, (like, like, like, like, like, like, like, like))
+        match = re.match(r'^(C|G|CH)\s*[- ]\s*(\d.*)$', q, re.IGNORECASE)
+        if match:
+            prefijo = match.group(1).upper()
+            numero = match.group(2).strip()
+            sql += " WHERE t.num_ticket LIKE %s"
+            params.append(f'%{numero}%')
+        else:
+            like = f'%{q}%'
+            sql += """
+                WHERE t.num_ticket LIKE %s OR t.cliente LIKE %s OR t.nodo LIKE %s 
+                   OR t.motivo_ticket LIKE %s OR t.tipo_falla LIKE %s OR t.status LIKE %s 
+                   OR t.responsable LIKE %s OR t.observaciones LIKE %s
+            """
+            params.extend([like]*8)
+        sql += " ORDER BY t.fecha DESC, t.num_ticket DESC LIMIT 50"
     else:
-        cur.execute("SELECT * FROM tickets ORDER BY fecha DESC, num_ticket DESC LIMIT 50")
+        sql += " ORDER BY t.fecha DESC, t.num_ticket DESC LIMIT 50"
+
+    cur.execute(sql, params)
     tickets = cur.fetchall()
-    cur.close()
     for t in tickets:
+        zona = determinar_zona(t.get('nodo', ''))
+        t['zona_inicial'] = zona
+        t['ticket_display'] = f"{zona}-{t['num_ticket']}" if zona else t['num_ticket']
+        t['responsable_display'] = t.get('cor_nombre') or t.get('responsable') or ''
         if t.get('fecha') and hasattr(t['fecha'], 'strftime'):
             t['fecha'] = t['fecha'].strftime('%Y-%m-%d')
+    cur.close()
     return jsonify(tickets)
 
 @app.route('/api/buscar_cliente_json')
@@ -877,85 +1117,139 @@ def api_buscar_cliente():
 @app.route('/cargar_tickets', methods=['POST'])
 @login_required
 def cargar_tickets():
+    if current_user.rol not in ('admin', 'cor'):
+        flash('Acceso denegado', 'danger')
+        return redirect(url_for('dashboard'))
+
     archivo = request.files['archivo']
     if not archivo:
         flash('No se seleccionó archivo', 'danger')
         return redirect(url_for('tickets'))
+
     ext = os.path.splitext(archivo.filename)[1].lower()
     if ext not in ['.xlsx', '.xls', '.csv']:
         flash('Solo se permiten archivos .xlsx, .xls y .csv', 'danger')
         return redirect(url_for('tickets'))
+
     temp = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
     archivo.save(temp.name)
     temp.close()
+
     try:
         filas = leer_archivo_datos(temp.name, ext)
         try:
             os.unlink(temp.name)
         except Exception as e:
             print(f"Advertencia: no se pudo eliminar {temp.name}: {e}")
+
         if not filas:
             flash('El archivo está vacío', 'danger')
             return redirect(url_for('tickets'))
+
         mapeo, tipo = mapear_columnas(filas, CAMPOS_TICKETS, SINONIMOS)
         if tipo != 'tickets' or not mapeo:
             flash('No se pudieron identificar las columnas como tickets. Verifica el archivo.', 'danger')
             return redirect(url_for('tickets'))
+
         conn = get_db()
         cur = conn.cursor()
         insertados = 0
+        actualizados = 0
         errores = 0
+
         for idx, fila in enumerate(filas[1:], start=2):
             if not any(fila):
                 continue
+
             datos = procesar_fila_datos(fila, mapeo, 'tickets')
+
+            # Validar campos obligatorios
             if not datos.get('cliente') or not datos.get('fecha'):
                 errores += 1
-                print(f"Fila {idx}: faltan cliente o fecha")
+                print(f"Fila {idx}: falta cliente o fecha válida. Cliente='{datos.get('cliente')}', Fecha='{datos.get('fecha')}'")
                 continue
+
             num_ticket = str(datos.get('num_ticket', '')).strip()
             if not num_ticket:
                 errores += 1
                 print(f"Fila {idx}: num_ticket vacío")
                 continue
-            cur.execute("SELECT id FROM tickets WHERE num_ticket = %s AND fecha = %s", (num_ticket, datos['fecha']))
-            if cur.fetchone():
-                errores += 1
-                print(f"Fila {idx}: duplicado de {num_ticket} en {datos['fecha']}")
-                continue
-            if datos.get('tipo_falla') and 'ap caida' in datos['tipo_falla'].lower():
-                datos['tipo_falla'] = 'AP caída'
-            cur.execute("""
-                INSERT INTO tickets (fecha, num_ticket, nodo, cliente, motivo_ticket, visita_tecnica, 
-                                    tipo_falla, departamento, status, responsable, observaciones, tecnico_id)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NULL)
-            """, (datos.get('fecha'), num_ticket, datos.get('nodo', ''), datos.get('cliente'),
-                  datos.get('motivo_ticket', ''), datos.get('visita_tecnica', ''),
-                  datos.get('tipo_falla', ''), datos.get('departamento', ''),
-                  datos.get('status', 'Pendiente'), datos.get('responsable', ''),
-                  datos.get('observaciones', '')))
-            insertados += 1
+
+            # Verificar si el ticket ya existe (por número de ticket)
+            cur.execute("SELECT id FROM tickets WHERE num_ticket = %s", (num_ticket,))
+            ticket_existente = cur.fetchone()
+
+            if ticket_existente:
+                # Actualizar el ticket existente
+                cur.execute("""
+                    UPDATE tickets SET
+                        fecha=%s, nodo=%s, cliente=%s, motivo_ticket=%s,
+                        visita_tecnica=%s, tipo_falla=%s, departamento=%s,
+                        status=%s, responsable=%s, observaciones=%s, tecnico_id=%s, cor_id=%s
+                    WHERE id=%s
+                """, (
+                    datos.get('fecha'),
+                    datos.get('nodo', ''),
+                    datos.get('cliente', ''),
+                    datos.get('motivo_ticket', ''),
+                    datos.get('visita_tecnica', ''),
+                    datos.get('tipo_falla', ''),
+                    datos.get('departamento', ''),
+                    datos.get('status', 'Pendiente'),
+                    datos.get('responsable', ''),
+                    datos.get('observaciones', ''),
+                    None,   # tecnico_id se deja NULL en importación
+                    None,   # cor_id se deja NULL, se asignará manualmente si es necesario
+                    ticket_existente['id']
+                ))
+                actualizados += 1
+            else:
+                # Insertar nuevo ticket
+                if datos.get('tipo_falla') and 'ap caida' in datos['tipo_falla'].lower():
+                    datos['tipo_falla'] = 'AP caída'
+                cur.execute("""
+                    INSERT INTO tickets (fecha, num_ticket, nodo, cliente, motivo_ticket, visita_tecnica, 
+                                        tipo_falla, departamento, status, responsable, observaciones, tecnico_id, cor_id)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NULL,NULL)
+                """, (
+                    datos.get('fecha'),
+                    num_ticket,
+                    datos.get('nodo', ''),
+                    datos.get('cliente', ''),
+                    datos.get('motivo_ticket', ''),
+                    datos.get('visita_tecnica', ''),
+                    datos.get('tipo_falla', ''),
+                    datos.get('departamento', ''),
+                    datos.get('status', 'Pendiente'),
+                    datos.get('responsable', ''),
+                    datos.get('observaciones', '')
+                ))
+                insertados += 1
+
         conn.commit()
         cur.close()
-        flash(f'{insertados} tickets importados correctamente, {errores} errores.', 'success')
+        flash(f'{insertados} tickets importados, {actualizados} actualizados, {errores} errores.', 'success')
     except Exception as e:
         try:
             os.unlink(temp.name)
         except Exception:
             pass
         flash(f'Error al procesar el archivo: {str(e)}', 'danger')
+
     return redirect(url_for('tickets'))
 
 @app.route('/agregar_ticket', methods=['POST'])
 @login_required
 def agregar_ticket():
+    if current_user.rol not in ('admin', 'cor'):
+        flash('Acceso denegado', 'danger')
+        return redirect(url_for('dashboard'))
     nodo = request.form.get('nodo', '').strip()
     cliente_id = request.form.get('cliente_id', '').strip()
     motivo_ticket = request.form.get('motivo_ticket', '').strip()
     visita_tecnica = request.form.get('visita_tecnica', '').strip()
     tipo_falla = request.form.get('tipo_falla', '').strip()
     status = request.form.get('status', 'Pendiente').strip()
-    responsable = request.form.get('responsable', '').strip()
     tecnico_id = request.form.get('tecnico_id', '').strip()
     observaciones = request.form.get('observaciones', '').strip()
     cliente_nombre_busqueda = request.form.get('cliente_nombre_busqueda', '').strip()
@@ -993,12 +1287,20 @@ def agregar_ticket():
 
     tecnico_id = int(tecnico_id) if tecnico_id else None
 
+    # Asignación automática de responsable
+    if current_user.rol == 'cor':
+        responsable = current_user.nombre_completo
+        cor_id = current_user.id
+    else:
+        responsable = ''  # admin no asigna responsable automáticamente
+        cor_id = None
+
     cur.execute("""
         INSERT INTO tickets (fecha, num_ticket, nodo, cliente, motivo_ticket, visita_tecnica, 
-                            tipo_falla, departamento, status, responsable, observaciones, tecnico_id)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                            tipo_falla, departamento, status, responsable, observaciones, tecnico_id, cor_id)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
     """, (fecha, num_ticket, nodo, cliente_nombre, motivo_ticket, visita_tecnica, 
-          tipo_falla, '', status, responsable, observaciones, tecnico_id))
+          tipo_falla, '', status, responsable, observaciones, tecnico_id, cor_id))
     conn.commit()
     ticket_id = cur.lastrowid
     cur.close()
@@ -1008,6 +1310,9 @@ def agregar_ticket():
 @app.route('/ticket/<int:ticket_id>/eliminar', methods=['POST'])
 @login_required
 def eliminar_ticket(ticket_id):
+    if current_user.rol not in ('admin', 'cor'):
+        flash('Acceso denegado', 'danger')
+        return redirect(url_for('dashboard'))
     conn = get_db()
     cur = conn.cursor()
     cur.execute("DELETE FROM tickets WHERE id = %s", (ticket_id,))
@@ -1019,15 +1324,23 @@ def eliminar_ticket(ticket_id):
 @app.route('/ticket/<int:ticket_id>')
 @login_required
 def detalle_ticket(ticket_id):
+    if current_user.rol not in ('admin', 'cor'):
+        flash('Acceso denegado', 'danger')
+        return redirect(url_for('dashboard'))
     conn = get_db()
     cur = conn.cursor()
     cur.execute("""
-        SELECT t.*, tec.nombre_completo as tecnico_nombre, tec.cedula as tecnico_cedula, tec.telefono as tecnico_telefono
+        SELECT t.*, tec.nombre_completo as tecnico_nombre, tec.cedula as tecnico_cedula, tec.telefono as tecnico_telefono,
+               uc.nombre_completo as cor_nombre
         FROM tickets t
         LEFT JOIN trabajadores tec ON t.tecnico_id = tec.id
+        LEFT JOIN usuarios_cor uc ON t.cor_id = uc.id
         WHERE t.id = %s
     """, (ticket_id,))
     ticket = cur.fetchone()
+    if ticket:
+        ticket['zona_inicial'] = determinar_zona(ticket.get('nodo', ''))
+        ticket['responsable_display'] = ticket.get('cor_nombre') or ticket.get('responsable') or ''
     cur.close()
     if not ticket:
         flash('Ticket no encontrado', 'danger')
@@ -1037,6 +1350,9 @@ def detalle_ticket(ticket_id):
 @app.route('/ticket/<int:ticket_id>/editar', methods=['GET', 'POST'])
 @login_required
 def editar_ticket(ticket_id):
+    if current_user.rol not in ('admin', 'cor'):
+        flash('Acceso denegado', 'danger')
+        return redirect(url_for('dashboard'))
     conn = get_db()
     cur = conn.cursor()
     cur.execute("SELECT * FROM tickets WHERE id = %s", (ticket_id,))
@@ -1053,9 +1369,20 @@ def editar_ticket(ticket_id):
         tipo_falla = request.form.get('tipo_falla', '').strip()
         departamento = request.form.get('departamento', '').strip()
         status = request.form.get('status', '').strip()
-        responsable = request.form.get('responsable', '').strip()
         tecnico_id = request.form.get('tecnico_id', '').strip()
         observaciones = request.form.get('observaciones', '').strip()
+
+        # No se permite editar responsable automáticamente; se mantiene el existente.
+        # Si el ticket fue creado por admin (responsable vacío), se puede asignar un responsable opcional desde un select.
+        responsable_nuevo = request.form.get('responsable', '').strip()
+        if ticket.get('responsable') == '' and responsable_nuevo:
+            # Buscar usuario COR por nombre
+            cur.execute("SELECT id, nombre_completo FROM usuarios_cor WHERE nombre_completo = %s", (responsable_nuevo,))
+            cor = cur.fetchone()
+            if cor:
+                cur.execute("UPDATE tickets SET responsable=%s, cor_id=%s WHERE id=%s", (cor['nombre_completo'], cor['id'], ticket_id))
+            else:
+                cur.execute("UPDATE tickets SET responsable=%s WHERE id=%s", (responsable_nuevo, ticket_id))
 
         if re.search(r'ap\s*ca[ií]da', tipo_falla, re.IGNORECASE):
             tipo_falla = 'AP caída'
@@ -1063,15 +1390,16 @@ def editar_ticket(ticket_id):
 
         cur.execute("""
             UPDATE tickets SET nodo=%s, motivo_ticket=%s, visita_tecnica=%s, tipo_falla=%s,
-            departamento=%s, status=%s, responsable=%s, tecnico_id=%s, observaciones=%s
+            departamento=%s, status=%s, tecnico_id=%s, observaciones=%s
             WHERE id=%s
         """, (nodo, motivo_ticket, visita_tecnica, tipo_falla, departamento, status,
-              responsable, tecnico_id, observaciones, ticket_id))
+              tecnico_id, observaciones, ticket_id))
         conn.commit()
         cur.close()
         flash('Ticket actualizado correctamente', 'success')
         return redirect(url_for('detalle_ticket', ticket_id=ticket_id))
 
+    # GET: cargar listas
     cur.execute("SELECT DISTINCT nodo FROM clientes WHERE nodo IS NOT NULL AND nodo != '' UNION SELECT DISTINCT nodo FROM tickets WHERE nodo IS NOT NULL AND nodo != '' ORDER BY nodo")
     nodos = [row['nodo'] for row in cur.fetchall()]
     cur.execute("SELECT DISTINCT motivo_ticket FROM tickets WHERE motivo_ticket IS NOT NULL AND motivo_ticket != '' ORDER BY motivo_ticket")
@@ -1082,41 +1410,46 @@ def editar_ticket(ticket_id):
     estados = [row['status'] for row in cur.fetchall()]
     cur.execute("SELECT id, nombre_completo FROM trabajadores WHERE rol = 'tecnico' ORDER BY nombre_completo")
     tecnicos = cur.fetchall()
+    cur.execute("SELECT id, nombre_completo FROM usuarios_cor ORDER BY nombre_completo")
+    usuarios_cor = cur.fetchall()
     cur.close()
     return render_template('editar_ticket.html', ticket=ticket, nodos=nodos, motivos=motivos,
-                           tipos_falla=tipos_falla, estados=estados, tecnicos=tecnicos)
+                           tipos_falla=tipos_falla, estados=estados, tecnicos=tecnicos, usuarios_cor=usuarios_cor)
 
 # ---------- API TICKET DETALLE ----------
 @app.route('/api/ticket/<int:ticket_id>')
 @login_required
 def api_ticket_detalle(ticket_id):
+    if current_user.rol not in ('admin', 'cor'):
+        return jsonify({'error': 'Acceso denegado'}), 403
     conn = get_db()
     cur = conn.cursor()
-    cur.execute("SELECT * FROM tickets WHERE id = %s", (ticket_id,))
+    cur.execute("""
+        SELECT t.*, tec.nombre_completo as tecnico_nombre, tec.cedula as tecnico_cedula, tec.telefono as tecnico_telefono,
+               uc.nombre_completo as cor_nombre
+        FROM tickets t
+        LEFT JOIN trabajadores tec ON t.tecnico_id = tec.id
+        LEFT JOIN usuarios_cor uc ON t.cor_id = uc.id
+        WHERE t.id = %s
+    """, (ticket_id,))
     ticket = cur.fetchone()
     if not ticket:
         cur.close()
         return jsonify({'error': 'Ticket no encontrado'}), 404
-    cliente = None
-    tecnico = None
-    if ticket.get('cliente'):
-        cur.execute("SELECT * FROM clientes WHERE nombre_apellido = %s LIMIT 1", (ticket['cliente'],))
-        cliente = cur.fetchone()
-    if ticket.get('tecnico_id'):
-        cur.execute("SELECT id, username, nombre_completo, cedula, telefono FROM trabajadores WHERE id = %s AND rol = 'tecnico'", (ticket['tecnico_id'],))
-        tecnico = cur.fetchone()
+    zona = determinar_zona(ticket.get('nodo', ''))
+    ticket['zona_inicial'] = zona
+    ticket['ticket_display'] = f"{zona}-{ticket['num_ticket']}" if zona else ticket['num_ticket']
+    ticket['responsable_display'] = ticket.get('cor_nombre') or ticket.get('responsable') or ''
     cur.close()
     if ticket.get('fecha') and hasattr(ticket['fecha'], 'strftime'):
         ticket['fecha'] = ticket['fecha'].strftime('%Y-%m-%d')
-    if cliente and cliente.get('creado_en') and hasattr(cliente['creado_en'], 'strftime'):
-        cliente['creado_en'] = cliente['creado_en'].strftime('%Y-%m-%d %H:%M:%S')
-    return jsonify({'ticket': ticket, 'cliente': cliente, 'tecnico': tecnico})
+    return jsonify({'ticket': ticket})
 
 # ---------- ADMINISTRACIÓN ----------
 @app.route('/admin')
 @login_required
 def admin_panel():
-    if current_user.rol != 'admin':
+    if current_user.rol not in ('admin', 'cor'):
         flash('Acceso denegado', 'danger')
         return redirect(url_for('dashboard'))
     conn = get_db()
@@ -1133,7 +1466,7 @@ def admin_panel():
 @app.route('/admin/tecnicos', methods=['GET', 'POST'])
 @login_required
 def admin_tecnicos():
-    if current_user.rol != 'admin':
+    if current_user.rol not in ('admin', 'cor'):
         flash('Acceso denegado', 'danger')
         return redirect(url_for('dashboard'))
     conn = get_db()
@@ -1174,7 +1507,7 @@ def admin_tecnicos():
 @app.route('/admin/tecnico/<int:id>/eliminar', methods=['POST'])
 @login_required
 def eliminar_tecnico(id):
-    if current_user.rol != 'admin':
+    if current_user.rol not in ('admin', 'cor'):
         flash('Acceso denegado', 'danger')
         return redirect(url_for('dashboard'))
     if id == current_user.id:
@@ -1195,7 +1528,7 @@ def eliminar_tecnico(id):
 @app.route('/admin/duplicados')
 @login_required
 def admin_duplicados():
-    if current_user.rol != 'admin':
+    if current_user.rol not in ('admin', 'cor'):
         flash('Acceso denegado', 'danger')
         return redirect(url_for('dashboard'))
     conn = get_db()
@@ -1231,7 +1564,7 @@ def admin_duplicados():
 @app.route('/admin/eliminar_duplicados_auto', methods=['POST'])
 @login_required
 def eliminar_duplicados_auto():
-    if current_user.rol != 'admin':
+    if current_user.rol not in ('admin', 'cor'):
         flash('Acceso denegado', 'danger')
         return redirect(url_for('dashboard'))
     conn = get_db()
@@ -1282,13 +1615,11 @@ def generar_pdf_planilla(cliente, tecnico, motivo, tipo_falla, observaciones, nu
     c = pdfcanvas.Canvas(buffer, pagesize=letter)
     width, height = letter
 
-    # Márgenes uniformes
     margin = 50
     x_left = margin
     x_right = width - margin
     y = height - margin
 
-    # ------------------- ENCABEZADO -------------------
     c.setFont("Helvetica-Bold", 14)
     c.drawCentredString(width / 2, y, "DATINVOZ C.A")
     c.setFont("Helvetica", 8)
@@ -1301,15 +1632,12 @@ def generar_pdf_planilla(cliente, tecnico, motivo, tipo_falla, observaciones, nu
     else:
         c.drawCentredString(width / 2, y - 40, f"ORDEN DE SERVICIO TECNICO - {tipo_planilla.upper()}")
 
-    # Número correlativo en esquina superior derecha
     c.setFont("Helvetica", 9)
     c.drawRightString(x_right, y - 10, f"N° Correlativo: {numero_correlativo if numero_correlativo else '________'}")
 
-    # Línea separadora
     c.setStrokeColor(colors.black)
     c.line(x_left, y - 50, x_right, y - 50)
 
-    # ------------------- DATOS DEL TICKET -------------------
     y = y - 65
     c.setFont("Helvetica", 9)
     if tipo_planilla.lower() == 'soporte':
@@ -1322,9 +1650,7 @@ def generar_pdf_planilla(cliente, tecnico, motivo, tipo_falla, observaciones, nu
         c.drawString(x_left + 200, y, f"Hora Inicio: {hora_inicio if hora_inicio else '________'}")
         c.drawString(x_left + 400, y, f"Hora Fin: {hora_fin if hora_fin else '________'}")
 
-    # ------------------- FUNCIÓN DE AJUSTE DE TEXTO -------------------
     def wrap_text(text, font_name, font_size, max_width):
-        """Divide texto en líneas respetando ancho máximo real."""
         if not text:
             return ['']
         words = text.split()
@@ -1343,7 +1669,6 @@ def generar_pdf_planilla(cliente, tecnico, motivo, tipo_falla, observaciones, nu
         return lines if lines else ['']
 
     def draw_wrapped_text(text, x, y, font_name, font_size, line_height=12):
-        """Dibuja texto envuelto en líneas, retornando nueva posición Y."""
         c.setFont(font_name, font_size)
         max_width = x_right - x
         lines = wrap_text(text, font_name, font_size, max_width)
@@ -1355,7 +1680,6 @@ def generar_pdf_planilla(cliente, tecnico, motivo, tipo_falla, observaciones, nu
             y -= line_height
         return y
 
-    # ------------------- DATOS DEL CLIENTE -------------------
     y -= 28
     c.setFont("Helvetica-Bold", 10)
     c.drawString(x_left, y, "DATOS DEL CLIENTE")
@@ -1370,13 +1694,11 @@ def generar_pdf_planilla(cliente, tecnico, motivo, tipo_falla, observaciones, nu
     y -= 4
     y = draw_wrapped_text(f"Teléfono: {telefono or '____________________'}", x_left, y, "Helvetica", 9)
 
-    # ------------------- DESCRIPCIÓN DEL SERVICIO -------------------
     y -= 20
     c.setFont("Helvetica-Bold", 10)
     c.drawString(x_left, y, "DESCRIPCION DEL SERVICIO REALIZADO:")
     y -= 16
 
-    # Dibujar observaciones completas, sin límite
     c.setFont("Helvetica", 9)
     obs_text = observaciones if observaciones else ''
     lines = wrap_text(obs_text, "Helvetica", 9, x_right - x_left)
@@ -1388,7 +1710,6 @@ def generar_pdf_planilla(cliente, tecnico, motivo, tipo_falla, observaciones, nu
         c.drawString(x_left + 4, y, line)
         y -= 12
 
-    # Líneas adicionales en blanco para escritura manual
     blank_lines = 4
     for _ in range(blank_lines):
         if y < 60:
@@ -1397,7 +1718,6 @@ def generar_pdf_planilla(cliente, tecnico, motivo, tipo_falla, observaciones, nu
         c.line(x_left, y, x_right, y)
         y -= 14
 
-    # ------------------- MATERIALES -------------------
     y -= 15
     if y < 80:
         c.showPage()
@@ -1420,7 +1740,6 @@ def generar_pdf_planilla(cliente, tecnico, motivo, tipo_falla, observaciones, nu
         c.drawString(x_left + 350, y, "________________")
         y -= 14
 
-    # ------------------- DATOS DEL TÉCNICO -------------------
     y -= 18
     if y < 80:
         c.showPage()
@@ -1444,7 +1763,6 @@ def generar_pdf_planilla(cliente, tecnico, motivo, tipo_falla, observaciones, nu
     y -= 14
     c.drawString(x_left, y, "Firma: __________________________")
 
-    # ------------------- VERIFICACIONES -------------------
     y -= 24
     if y < 80:
         c.showPage()
@@ -1467,7 +1785,6 @@ def generar_pdf_planilla(cliente, tecnico, motivo, tipo_falla, observaciones, nu
     c.drawString(x_left + 220, y, "[ ] Servicio no resuelto")
     c.drawString(x_left + 380, y, "[ ] Solo inspección")
 
-    # ------------------- VALIDACIÓN FINAL -------------------
     y -= 24
     if y < 80:
         c.showPage()
@@ -1484,7 +1801,6 @@ def generar_pdf_planilla(cliente, tecnico, motivo, tipo_falla, observaciones, nu
     c.drawString(x_left + 180, y, "Firma: ________________")
     c.drawString(x_left + 360, y, "Firma: ________________")
 
-    # Pie de página
     c.setFont("Helvetica-Oblique", 7)
     c.drawCentredString(width / 2, 20, "Documento generado automáticamente - Sistema de Reportes de Fallas v1.0")
 
@@ -1498,6 +1814,9 @@ def generar_pdf_planilla(cliente, tecnico, motivo, tipo_falla, observaciones, nu
 @app.route('/planilla_soporte')
 @login_required
 def planilla_soporte():
+    if current_user.rol not in ('admin', 'cor'):
+        flash('Acceso denegado', 'danger')
+        return redirect(url_for('dashboard'))
     ticket_id = request.args.get('ticket_id', type=int)
     ticket = None
     cliente = None
@@ -1510,6 +1829,9 @@ def planilla_soporte():
             cur.execute("SELECT * FROM clientes WHERE nombre_apellido = %s LIMIT 1", (ticket['cliente'],))
             cliente = cur.fetchone()
         cur.close()
+        if ticket:
+            ticket['zona_inicial'] = determinar_zona(ticket.get('nodo', ''))
+            ticket['ticket_display'] = f"{ticket['zona_inicial']}-{ticket['num_ticket']}" if ticket['zona_inicial'] else ticket['num_ticket']
     generados = []
     if os.path.exists(GENERADOS_FOLDER):
         for f in os.listdir(GENERADOS_FOLDER):
@@ -1548,6 +1870,9 @@ def planilla_soporte():
 @app.route('/planilla_soporte/generar_planilla', methods=['POST'])
 @login_required
 def generar_planilla_cliente():
+    if current_user.rol not in ('admin', 'cor'):
+        flash('Acceso denegado', 'danger')
+        return redirect(url_for('dashboard'))
     ticket_id = request.form.get('ticket_id', '').strip()
     cliente_id = request.form.get('cliente_id', '').strip()
     tipo_planilla = request.form.get('tipo_planilla', 'soporte').strip().lower()
@@ -1567,7 +1892,6 @@ def generar_planilla_cliente():
             flash('Ticket no encontrado', 'danger')
             return redirect(url_for('planilla_soporte'))
 
-        # Obtener cliente asociado
         if cliente_id:
             cur.execute("SELECT * FROM clientes WHERE id = %s", (cliente_id,))
             cliente = cur.fetchone()
@@ -1575,7 +1899,6 @@ def generar_planilla_cliente():
             cur.execute("SELECT * FROM clientes WHERE nombre_apellido = %s LIMIT 1", (ticket['cliente'],))
             cliente = cur.fetchone()
 
-        # Si no se encuentra cliente, creamos uno provisional con el nombre del ticket
         if not cliente:
             cliente = {
                 'id': None,
@@ -1588,7 +1911,6 @@ def generar_planilla_cliente():
                 'asignador': ''
             }
 
-        # Obtener técnico por tecnico_id si existe
         if ticket.get('tecnico_id'):
             cur.execute("SELECT id, username, nombre_completo, cedula, telefono FROM trabajadores WHERE id = %s AND rol = 'tecnico'", (ticket['tecnico_id'],))
             tecnico = cur.fetchone()
@@ -1612,11 +1934,14 @@ def generar_planilla_cliente():
             'cliente': cliente['nombre_apellido']
         }
 
-    # Si no es soporte, no usar número de ticket
     if tipo_planilla != 'soporte':
         num_ticket = ''
     else:
-        num_ticket = ticket.get('num_ticket', '') if ticket else ''
+        zona = determinar_zona(ticket.get('nodo', '')) if ticket else ''
+        if zona:
+            num_ticket = f"{zona}-{ticket.get('num_ticket', '')}" if ticket.get('num_ticket') else ''
+        else:
+            num_ticket = ticket.get('num_ticket', '') if ticket else ''
 
     motivo = ticket.get('motivo_ticket', '') if ticket else ''
     tipo_falla = ticket.get('tipo_falla', '') if ticket else ''
@@ -1630,7 +1955,6 @@ def generar_planilla_cliente():
             num_ticket, '', '', tipo_planilla, numero_correlativo
         )
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        # Usar el id del cliente o 0 si es provisional
         cliente_id_final = cliente['id'] if cliente.get('id') else 0
         output_filename = f"planilla_{cliente_id_final}_{timestamp}.pdf"
         output_path = os.path.join(GENERADOS_FOLDER, output_filename)
@@ -1692,7 +2016,7 @@ def eliminar_seleccionadas():
 @app.route('/admin/respaldos')
 @login_required
 def listar_respaldos():
-    if current_user.rol != 'admin':
+    if current_user.rol not in ('admin', 'cor'):
         flash('Acceso denegado', 'danger')
         return redirect(url_for('dashboard'))
     backup_folder = app.config['BACKUP_FOLDER']
@@ -1715,7 +2039,7 @@ def listar_respaldos():
 @app.route('/admin/respaldo/descargar/<filename>')
 @login_required
 def descargar_respaldo(filename):
-    if current_user.rol != 'admin':
+    if current_user.rol not in ('admin', 'cor'):
         flash('Acceso denegado', 'danger')
         return redirect(url_for('dashboard'))
     return send_from_directory(app.config['BACKUP_FOLDER'], filename, as_attachment=True)
@@ -1723,7 +2047,7 @@ def descargar_respaldo(filename):
 @app.route('/admin/respaldo/eliminar/<filename>', methods=['POST'])
 @login_required
 def eliminar_respaldo(filename):
-    if current_user.rol != 'admin':
+    if current_user.rol not in ('admin', 'cor'):
         flash('Acceso denegado', 'danger')
         return redirect(url_for('dashboard'))
     ruta = os.path.join(app.config['BACKUP_FOLDER'], filename)
@@ -1737,7 +2061,7 @@ def eliminar_respaldo(filename):
 @app.route('/backup_manual', methods=['POST'])
 @login_required
 def backup_manual():
-    if current_user.rol != 'admin':
+    if current_user.rol not in ('admin', 'cor'):
         flash('Acceso denegado', 'danger')
         return redirect(url_for('dashboard'))
     filepath, error = crear_respaldo('manual')
@@ -1840,6 +2164,8 @@ def generar_respaldo_sql():
 @app.route('/api/cliente/<int:cliente_id>')
 @login_required
 def api_cliente_detalle(cliente_id):
+    if current_user.rol not in ('admin', 'cor'):
+        return jsonify({'error': 'Acceso denegado'}), 403
     conn = get_db()
     cur = conn.cursor()
     cur.execute("SELECT * FROM clientes WHERE id = %s", (cliente_id,))
@@ -1864,7 +2190,7 @@ def api_cliente_detalle(cliente_id):
 @app.route('/api/usuarios_online')
 @login_required
 def api_usuarios_online():
-    if current_user.rol != 'admin':
+    if current_user.rol not in ('admin', 'cor'):
         return jsonify({'error': 'Acceso denegado'}), 403
     conn = get_db()
     cur = conn.cursor()
@@ -1883,7 +2209,7 @@ def api_usuarios_online():
 @app.route('/graficas')
 @login_required
 def graficas():
-    if current_user.rol != 'admin':
+    if current_user.rol not in ('admin', 'cor'):
         flash('Acceso denegado', 'danger')
         return redirect(url_for('dashboard'))
     return render_template('graficas.html')
@@ -1891,7 +2217,7 @@ def graficas():
 @app.route('/api/graficas/datos')
 @login_required
 def api_graficas_datos():
-    if current_user.rol != 'admin':
+    if current_user.rol not in ('admin', 'cor'):
         return jsonify({'error': 'Acceso denegado'}), 403
     filtro = request.args.get('filtro', 'tickets')
     conn = get_db()

@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+{% block title %}Usuarios COR{% endblock %}
+{% block heading %}Usuarios COR{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header"><i class="fas fa-user-shield"></i> Agregar Usuario COR</div>
+    <div class="card-body">
+        <form method="POST" action="/admin/cor" class="row g-3">
+            <div class="col-md-3">
+                <label class="form-label">Usuario *</label>
+                <input type="text" name="username" class="form-control" required>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Nombre Completo *</label>
+                <input type="text" name="nombre_completo" class="form-control" required>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Contraseña *</label>
+                <input type="password" name="password" class="form-control" required>
+            </div>
+            <div class="col-md-3 d-flex align-items-end">
+                <button type="submit" class="btn btn-amarillo w-100"><i class="fas fa-save"></i> Agregar</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header"><i class="fas fa-users"></i> Usuarios Registrados</div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Usuario</th>
+                        <th>Nombre</th>
+                        <th>Estado</th>
+                        <th>Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for u in usuarios %}
+                    <tr>
+                        <td>{{ u.id }}</td>
+                        <td>{{ u.username }}</td>
+                        <td>{{ u.nombre_completo }}</td>
+                        <td>
+                            {% if u.online == 1 %}
+                                <span class="badge badge-success">En línea</span>
+                            {% else %}
+                                <span class="badge badge-secondary">Desconectado</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <button class="btn btn-sm btn-outline-primary btn-editar"
+                                    data-id="{{ u.id }}"
+                                    data-username="{{ u.username }}"
+                                    data-nombre="{{ u.nombre_completo }}">
+                                <i class="fas fa-edit"></i>
+                            </button>
+                            <form method="POST" action="/admin/cor/eliminar/{{ u.id }}" style="display:inline;" onsubmit="return confirm('¿Eliminar usuario?')">
+                                <button type="submit" class="btn btn-sm btn-danger"><i class="fas fa-trash"></i></button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Modal editar -->
+<div class="modal fade" id="modalEditar" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <form method="POST" action="" id="formEditar">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Editar Usuario COR</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Usuario</label>
+                        <input type="text" name="username" id="edit_username" class="form-control" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Nombre Completo</label>
+                        <input type="text" name="nombre_completo" id="edit_nombre" class="form-control" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Nueva Contraseña (opcional)</label>
+                        <input type="password" name="password" id="edit_password" class="form-control" placeholder="Dejar en blanco para no cambiar">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="submit" class="btn btn-amarillo">Guardar</button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const modal = new bootstrap.Modal(document.getElementById('modalEditar'));
+    const form = document.getElementById('formEditar');
+    document.querySelectorAll('.btn-editar').forEach(btn => {
+        btn.addEventListener('click', function() {
+            const id = this.dataset.id;
+            document.getElementById('edit_username').value = this.dataset.username;
+            document.getElementById('edit_nombre').value = this.dataset.nombre;
+            form.action = '/admin/cor/editar/' + id;
+            modal.show();
+        });
+    });
+});
+</script>
+{% endblock %}

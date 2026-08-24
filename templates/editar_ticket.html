@@ -43,15 +43,6 @@
                 </select>
             </div>
             <div class="col-md-6">
-                <label class="form-label">Responsable</label>
-                <select name="responsable" class="form-select" required>
-                    <option value="">-- Seleccione --</option>
-                    <option value="Yanibel Martinel" {% if ticket.responsable == 'Yanibel Martinel' %}selected{% endif %}>Yanibel Martinez</option>
-                    <option value="Jonh Jiraldo" {% if ticket.responsable == 'Jonh Jiraldo' %}selected{% endif %}>Jhon Giraldo</option>
-                    <option value="Andres Reyes" {% if ticket.responsable == 'Andres Reyes' %}selected{% endif %}>Andres Reyes</option>
-                </select>
-            </div>
-            <div class="col-md-6">
                 <label class="form-label">Técnico Asignado</label>
                 <select name="tecnico_id" class="form-select">
                     <option value="">-- Seleccione --</option>
@@ -60,6 +51,21 @@
                     {% endfor %}
                 </select>
             </div>
+            {% if not ticket.responsable %}
+            <div class="col-md-6">
+                <label class="form-label">Responsable</label>
+                <select name="responsable" class="form-select">
+                    <option value="">-- Seleccione --</option>
+                    <option value="Yanibel Martinez">Yanibel Martinez</option>
+                    <option value="Jhon Giraldo">Jhon Giraldo</option>
+                    <option value="Andres Reyes">Andres Reyes</option>
+                    {% for c in cor_users %}
+                    <option value="{{ c.nombre_completo }}">{{ c.nombre_completo }}</option>
+                    {% endfor %}
+
+                </select>
+            </div>
+            {% endif %}
             <div class="col-12">
                 <label class="form-label">Observaciones</label>
                 <textarea name="observaciones" class="form-control" rows="3">{{ ticket.observaciones or '' }}</textarea>

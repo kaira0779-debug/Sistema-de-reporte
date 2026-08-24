@@ -55,15 +55,6 @@
                     </select>
                 </div>
                 <div class="col-md-3">
-                    <label class="form-label">Responsable</label>
-                    <select name="responsable" class="form-select" required>
-                        <option value="">-- Seleccione --</option>
-                        <option value="Yanibel Martinel">Yanibel Martinez</option>
-                        <option value="Jonh Jiraldo">Jhon Giraldo</option>
-                        <option value="Andres Reyes">Andres Reyes</option>
-                    </select>
-                </div>
-                <div class="col-md-3">
                     <label class="form-label">Técnico Asignado</label>
                     <select name="tecnico_id" id="tecnico_id" class="form-select">
                         <option value="">-- Seleccione --</option>
@@ -97,12 +88,30 @@
     </div>
 </div>
 
-<!-- Buscador y tabla de tickets -->
+<!-- Filtro y tabla -->
 <div class="card">
-    <div class="card-header"><i class="fas fa-search"></i> Búsqueda de Tickets</div>
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="fas fa-search"></i> Búsqueda de Tickets</span>
+        <span id="actualizacionTicket" class="badge bg-info text-dark">Actualización automática</span>
+    </div>
     <div class="card-body">
-        <input type="text" id="buscadorTickets" class="form-control" placeholder="Escriba para filtrar por número, cliente, nodo, motivo..." autocomplete="off">
-        <div class="mt-2"><span id="contadorTickets" class="text-muted small"></span></div>
+        <div class="row g-2">
+            <div class="col-md-8">
+                <input type="text" id="buscadorTickets" class="form-control" placeholder="Escriba para filtrar por número, cliente, nodo, motivo..." autocomplete="off">
+            </div>
+            <div class="col-md-4">
+                <select id="filtroZona" class="form-select">
+                    <option value="">Todas las zonas</option>
+                    <option value="C">Caracas (C)</option>
+                    <option value="G">Guatire-Guarenas (G)</option>
+                    <option value="CH">Chuspa (CH)</option>
+                    <option value="sin">Sin nodo</option>
+                </select>
+            </div>
+        </div>
+        <div class="mt-2">
+            <span id="contadorTickets" class="text-muted small"></span>
+        </div>
     </div>
 </div>
 
@@ -124,29 +133,8 @@
                         <th>Acciones</th>
                     </tr>
                 </thead>
-                <tbody>
-                    {% for ticket in tickets %}
-                    <tr>
-                        <td>{{ ticket.num_ticket }}</td>
-                        <td>{{ ticket.fecha.strftime('%d/%m/%Y') if ticket.fecha else '' }}</td>
-                        <td>{{ ticket.cliente }}</td>
-                        <td>{{ ticket.motivo_ticket }}</td>
-                        <td>{{ ticket.tipo_falla }}</td>
-                        <td><span class="badge {% if ticket.status == 'Pendiente' %}badge-warning{% elif ticket.status == 'En proceso' %}badge-info{% elif ticket.status == 'Resuelto' %}badge-success{% else %}badge-danger{% endif %}">{{ ticket.status }}</span></td>
-                        <td>{{ ticket.responsable }}</td>
-                        <td>{{ ticket.tecnico_nombre or '—' }}</td>
-                        <td>
-                            <div class="btn-group" role="group">
-                                <a href="/ticket/{{ ticket.id }}" class="btn btn-sm btn-outline-primary" title="Ver"><i class="fas fa-eye"></i></a>
-                                <a href="/ticket/{{ ticket.id }}/editar" class="btn btn-sm btn-outline-success" title="Editar"><i class="fas fa-edit"></i></a>
-                                <a href="/planilla_soporte?ticket_id={{ ticket.id }}" class="btn btn-sm btn-amarillo" title="Generar planilla"><i class="fas fa-file-pdf"></i></a>
-                                <form method="POST" action="/ticket/{{ ticket.id }}/eliminar" onsubmit="return confirm('¿Eliminar este ticket?')">
-                                    <button type="submit" class="btn btn-sm btn-outline-danger" title="Eliminar"><i class="fas fa-trash"></i></button>
-                                </form>
-                            </div>
-                        </td>
-                    </tr>
-                    {% endfor %}
+                <tbody id="tablaTicketsBody">
+                    <!-- Se rellena dinámicamente -->
                 </tbody>
             </table>
         </div>
@@ -156,7 +144,79 @@
 <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 <script>
 $(document).ready(function() {
-    // Autocompletado de cliente
+    // ======================
+    // FUNCIONES GLOBALES
+    // ======================
+    function renderTickets(tickets) {
+        let html = '';
+        if (tickets.length === 0) {
+            html = '<tr><td colspan="9" class="text-center text-muted">No se encontraron tickets</td></tr>';
+        } else {
+            tickets.forEach(ticket => {
+                const fecha = ticket.fecha ? new Date(ticket.fecha).toLocaleDateString('es-ES') : '';
+                const zona = ticket.zona_inicial || '';
+                const displayNum = zona ? `${zona}-${ticket.num_ticket}` : ticket.num_ticket;
+                const statusClass = {
+                    'Pendiente': 'badge-warning',
+                    'En proceso': 'badge-info',
+                    'Resuelto': 'badge-success',
+                    'No resuelto': 'badge-danger'
+                }[ticket.status] || 'badge-secondary';
+
+                html += `<tr data-zona="${zona || 'sin'}">
+                    <td>
+                        ${displayNum}
+                    </td>
+                    <td>${fecha}</td>
+                    <td>${ticket.cliente || ''}</td>
+                    <td>${ticket.motivo_ticket || ''}</td>
+                    <td>${ticket.tipo_falla || ''}</td>
+                    <td><span class="badge ${statusClass}">${ticket.status || ''}</span></td>
+                    <td>${ticket.responsable_display || '—'}</td>
+                    <td>${ticket.tecnico_nombre || '—'}</td>
+                    <td>
+                        <div class="btn-group" role="group">
+                            <a href="/ticket/${ticket.id}" class="btn btn-sm btn-outline-primary" title="Ver"><i class="fas fa-eye"></i></a>
+                            <a href="/ticket/${ticket.id}/editar" class="btn btn-sm btn-outline-success" title="Editar"><i class="fas fa-edit"></i></a>
+                            <a href="/planilla_soporte?ticket_id=${ticket.id}" class="btn btn-sm btn-amarillo" title="Generar planilla"><i class="fas fa-file-pdf"></i></a>
+                            <form method="POST" action="/ticket/${ticket.id}/eliminar" onsubmit="return confirm('¿Eliminar este ticket?')">
+                                <button type="submit" class="btn btn-sm btn-outline-danger" title="Eliminar"><i class="fas fa-trash"></i></button>
+                            </form>
+                        </div>
+                    </td>
+                </tr>`;
+            });
+        }
+        $('#tablaTicketsBody').html(html);
+        actualizarContador();
+    }
+
+    function cargarTickets() {
+        const q = $('#buscadorTickets').val().trim();
+        const zona = $('#filtroZona').val();
+        let url = '/api/buscar_tickets_json?q=' + encodeURIComponent(q);
+        $.get(url)
+            .done(function(data) {
+                // Aplicar filtro de zona localmente (ya que el endpoint no lo filtra)
+                if (zona !== '') {
+                    data = data.filter(t => t.zona_inicial === zona || (zona === 'sin' && !t.zona_inicial));
+                }
+                renderTickets(data);
+            })
+            .fail(function() {
+                // No mostrar mensaje de error, solo dejamos la tabla vacía
+                $('#tablaTicketsBody').html('<tr><td colspan="9" class="text-center text-muted">No se pudieron cargar los tickets</td></tr>');
+            });
+    }
+
+    function actualizarContador() {
+        const visibles = $('#tablaTicketsBody tr:visible').length;
+        $('#contadorTickets').text(visibles + ' ticket(s)');
+    }
+
+    // ======================
+    // AUTOCOMPLETADO DE CLIENTE
+    // ======================
     var timeoutBusqueda;
     var $inputCliente = $('#buscarCliente');
     var $resultadosClientes = $('#resultadosClientes');
@@ -164,10 +224,6 @@ $(document).ready(function() {
     var $clienteNombreBusqueda = $('#cliente_nombre_busqueda');
     var $mensajeCliente = $('#mensajeCliente');
     var $nodoSelect = $('#nodoSelect');
-
-    function mostrarCliente(cliente) {
-        // No mostramos panel, solo actualizamos nodo
-    }
 
     function actualizarNodo(nodoCliente) {
         if (!nodoCliente) return;
@@ -194,7 +250,6 @@ $(document).ready(function() {
         actualizarNodo(cliente.nodo || '');
         $resultadosClientes.hide().empty();
         $mensajeCliente.text('').hide();
-        console.log('Cliente seleccionado:', cliente);
     }
 
     function buscarClientes(texto) {
@@ -262,32 +317,23 @@ $(document).ready(function() {
         if (texto.length >= 2) buscarClientes(texto);
     });
 
-    // Filtro local de tickets
-    var inputTabla = document.getElementById('buscadorTickets');
-    var tabla = document.getElementById('tablaTickets');
-    var contador = document.getElementById('contadorTickets');
-    if (inputTabla && tabla) {
-        var filas = tabla.querySelectorAll('tbody tr');
-        var sinResultados = null;
-        inputTabla.addEventListener('input', function() {
-            var filtro = this.value.toLowerCase().trim();
-            var resultadosVisibles = 0;
-            filas.forEach(function(fila) {
-                var textoFila = fila.textContent.toLowerCase();
-                var coincide = textoFila.indexOf(filtro) !== -1;
-                fila.style.display = coincide ? '' : 'none';
-                if (coincide) resultadosVisibles++;
-            });
-            if (contador) contador.textContent = resultadosVisibles + ' ticket(s) encontrado(s)';
-            var tbody = tabla.querySelector('tbody');
-            if (sinResultados) { sinResultados.remove(); sinResultados = null; }
-            if (resultadosVisibles === 0 && filtro !== '') {
-                sinResultados = document.createElement('tr');
-                sinResultados.innerHTML = '<td colspan="9" class="text-center text-muted">No se encontraron tickets</td>';
-                tbody.appendChild(sinResultados);
-            }
-        });
-    }
+    // ======================
+    // FILTRO Y BÚSQUEDA
+    // ======================
+    $('#filtroZona').on('change', function() {
+        cargarTickets();
+    });
+
+    $('#buscadorTickets').on('input', function() {
+        clearTimeout(timeoutBusqueda);
+        timeoutBusqueda = setTimeout(cargarTickets, 300);
+    });
+
+    // ======================
+    // ACTUALIZACIÓN AUTOMÁTICA
+    // ======================
+    cargarTickets(); // Cargar inicial
+    setInterval(cargarTickets, 10000); // Actualizar cada 10 segundos
 });
 </script>
 {% endblock %}
