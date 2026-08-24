@@ -543,7 +543,7 @@ NODOS_GUATIRE_GUARENAS = {
 
 NODOS_CARACAS = {
     'Acuario', 'Valle Abajo', 'MARCONI', 'Torre centro Boyaca', 'SAMANES',
-    'Vista Alegre', 'El Valle - San Antonio', 'SANTA FE', 'Venevision',
+    'Vista Alegre', 'El Valle - San Antonio', 'SANTA FE', 'Venevision', 'San agustin',
     'El Tope', 'Petare', 'Senderos', 'Ciudad Tiuna', 'Torre Domus',
     'Plaza las Americas', 'Naranjos', 'Torre Britanica',
     'MACARACUAY', 'Palo Verde', 'ALAMEDA', 'BORDE QUINTA', 'VNET',
