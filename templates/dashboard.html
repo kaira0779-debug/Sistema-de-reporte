@@ -164,24 +164,31 @@
 
     <!-- Accesos rápidos -->
     <div class="card mb-4">
-        <div class="card-header"><span><i class="fas fa-bolt"></i> Accesos rápidos</span></div>
-        <div class="card-body">
-            <div class="row g-2 quick-actions">
-                <div class="col-6 col-md-3">
-                    <a href="/clientes" class="btn btn-outline-dark w-100"><i class="fas fa-user-plus"></i> Nuevo cliente</a>
-                </div>
-                <div class="col-6 col-md-3">
-                    <a href="/tickets" class="btn btn-outline-dark w-100"><i class="fas fa-ticket-alt"></i> Nuevo ticket</a>
-                </div>
-                <div class="col-6 col-md-3">
-                    <a href="/graficas" class="btn btn-outline-dark w-100"><i class="fas fa-chart-bar"></i> Ver gráficas</a>
-                </div>
-                <div class="col-6 col-md-3">
-                    <a href="/admin/respaldos" class="btn btn-outline-dark w-100"><i class="fas fa-database"></i> Respaldos</a>
-                </div>
+    <div class="card-header"><span><i class="fas fa-bolt"></i> Accesos rápidos</span></div>
+    <div class="card-body">
+        <div class="row g-2 quick-actions">
+            <div class="col-6 col-md-3">
+                <a href="/clientes" class="btn btn-outline-dark w-100"><i class="fas fa-user-plus"></i> Nuevo cliente</a>
+            </div>
+            <div class="col-6 col-md-3">
+                <a href="/tickets" class="btn btn-outline-dark w-100"><i class="fas fa-ticket-alt"></i> Nuevo ticket</a>
+            </div>
+            <div class="col-6 col-md-3">
+                <a href="/graficas" class="btn btn-outline-dark w-100"><i class="fas fa-chart-bar"></i> Ver gráficas</a>
+            </div>
+            <div class="col-6 col-md-3">
+                <a href="/admin/respaldos" class="btn btn-outline-dark w-100"><i class="fas fa-database"></i> Respaldos</a>
+            </div>
+            <div class="col-6 col-md-3 mt-2">
+                <form method="POST" action="/backup_manual" onsubmit="return confirm('¿Generar respaldo ahora?')" class="w-100">
+                    <button type="submit" class="btn btn-amarillo w-100">
+                        <i class="fas fa-download"></i> Generar respaldo
+                    </button>
+                </form>
             </div>
         </div>
     </div>
+</div>
 
     <!-- Administración -->
     <div class="row g-4">
