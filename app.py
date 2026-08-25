@@ -426,7 +426,9 @@ def leer_archivo_datos(filepath, extension):
                         if cell is None:
                             fila.append('')
                         elif isinstance(cell, datetime):
-                            fila.append(cell)  # Mantener datetime
+                            fila.append(cell)          # Mantener fecha como datetime
+                        elif isinstance(cell, (int, float)):
+                            fila.append(cell)          # Mantener número
                         else:
                             fila.append(str(cell).strip())
                     datos.append(fila)
@@ -434,6 +436,7 @@ def leer_archivo_datos(filepath, extension):
         finally:
             wb.close()
     else:
+        # Para CSV
         with open(filepath, 'rb') as f:
             raw = f.read(10000)
             encoding = chardet.detect(raw)['encoding'] or 'utf-8-sig'
@@ -452,7 +455,7 @@ def leer_archivo_datos(filepath, extension):
                         filas = list(reader)
                         if len(filas) >= 2:
                             break
-            return [[cell.strip() for cell in row] for row in filas if any(cell for cell in row)]
+            return [[cell.strip() if isinstance(cell, str) else cell for cell in row] for row in filas if any(cell is not None for cell in row)]
 
 def mapear_columnas(filas, campos_esperados, sinonimos):
     if not filas:
@@ -517,15 +520,29 @@ def procesar_fila_datos(fila, mapeo, tipo):
     datos = {}
     for campo, idx in mapeo.items():
         if idx < len(fila):
-            val = fila[idx].strip() if isinstance(fila[idx], str) else fila[idx]
+            val = fila[idx]
         else:
             val = ''
+
+        # Si es datetime, convertir a string
+        if isinstance(val, datetime):
+            val = val.strftime('%Y-%m-%d')
+        elif isinstance(val, (int, float)):
+            val = str(val).strip()
+        elif isinstance(val, str):
+            val = val.strip()
+
+        # Procesar según campo
         if campo == 'fecha':
-            val = convertir_fecha(val)
+            val = convertir_fecha(val) if val else ''
         elif campo in ['n_contrato', 'n_documento', 'telefono', 'mbps_contratados']:
             if isinstance(val, str):
                 val = re.sub(r'[^\w\-\.\+]', '', val)
         datos[campo] = val
+
+    # Asegurar que campos vacíos sean ''
+    for c in CAMPOS_CLIENTES + CAMPOS_TICKETS:
+        datos.setdefault(c, '')
     return datos
 
 # ============================================================
@@ -911,6 +928,49 @@ def agregar_cliente():
     elif resultado == 'updated': flash('Cliente actualizado (existía con ese número de contrato)', 'info')
     else: flash('Error al guardar el cliente', 'danger')
     return redirect(url_for('clientes'))
+
+@app.route('/api/agregar_cliente_ajax', methods=['POST'])
+@login_required
+def api_agregar_cliente_ajax():
+    if current_user.rol not in ('admin', 'cor'):
+        return jsonify({'error': 'Acceso denegado'}), 403
+
+    datos = {
+        'n_contrato': request.form.get('n_contrato', '').strip(),
+        'n_documento': request.form.get('n_documento', '').strip(),
+        'nombre_apellido': request.form.get('nombre_apellido', '').strip(),
+        'telefono': request.form.get('telefono', '').strip(),
+        'direccion_servicio': request.form.get('direccion_servicio', '').strip(),
+        'nodo': request.form.get('nodo', '').strip(),
+        'mbps_contratados': request.form.get('mbps_contratados', '').strip(),
+        'estatus_usuario': request.form.get('estatus_usuario', 'ACTIVO').strip()
+    }
+
+    if not datos['nombre_apellido']:
+        return jsonify({'error': 'El nombre del cliente es obligatorio'}), 400
+
+    resultado = guardar_cliente(datos)
+
+    if resultado == 'inserted' or resultado == 'updated':
+        # Obtener el id del cliente recién creado/actualizado
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("SELECT id, nombre_apellido, n_documento, telefono, nodo FROM clientes WHERE n_documento = %s AND nombre_apellido = %s LIMIT 1",
+                    (datos['n_documento'], datos['nombre_apellido']))
+        cliente = cur.fetchone()
+        cur.close()
+        if cliente:
+            return jsonify({'success': True, 'cliente': {
+                'id': cliente['id'],
+                'nombre_apellido': cliente['nombre_apellido'],
+                'n_documento': cliente['n_documento'],
+                'telefono': cliente['telefono'],
+                'nodo': cliente['nodo']
+            }})
+        else:
+            return jsonify({'success': True, 'cliente': {'id': None, 'nombre_apellido': datos['nombre_apellido']}})
+    else:
+        return jsonify({'error': 'No se pudo guardar el cliente'}), 500
 
 @app.route('/cliente/<int:cliente_id>/editar', methods=['GET', 'POST'])
 @login_required
