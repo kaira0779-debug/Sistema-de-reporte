@@ -284,67 +284,101 @@ def guardar_cliente(datos):
     cur = conn.cursor()
     n_contrato = datos.get('n_contrato', '').strip()
     n_documento = datos.get('n_documento', '').strip()
-    nombre = datos.get('nombre_apellido', '').strip()
+    nombre = datos.get('nombre_apellido', '').strip() or 'Sin nombre'
 
-    if not n_contrato:
-        if n_documento and nombre:
-            cur.execute("SELECT id FROM clientes WHERE n_documento = %s AND nombre_apellido = %s LIMIT 1", (n_documento, nombre))
-            cliente = cur.fetchone()
-        else:
-            cliente = None
-
-        if cliente:
-            cur.execute("""
-                UPDATE clientes SET n_documento=%s, nombre_apellido=%s, telefono=%s, direccion_servicio=%s,
-                nodo=%s, mbps_contratados=%s, estatus_usuario=%s
-                WHERE id=%s
-            """, (n_documento, nombre,
-                  datos.get('telefono','').strip(), datos.get('direccion_servicio','').strip(),
-                  datos.get('nodo','').strip(), datos.get('mbps_contratados','').strip(),
-                  datos.get('estatus_usuario','').strip(), cliente['id']))
-            conn.commit()
-            cur.close()
-            invalidar_cache()
-            return 'updated'
-        else:
-            cur.execute("""
-                INSERT INTO clientes (n_contrato, n_documento, nombre_apellido, telefono, direccion_servicio, nodo, mbps_contratados, estatus_usuario)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
-            """, ('', n_documento, nombre,
-                  datos.get('telefono','').strip(), datos.get('direccion_servicio','').strip(),
-                  datos.get('nodo','').strip(), datos.get('mbps_contratados','').strip(),
-                  datos.get('estatus_usuario','').strip()))
-            conn.commit()
-            cur.close()
-            invalidar_cache()
-            return 'inserted'
-    else:
+    if n_contrato:
+        # Clave: n_contrato
         cur.execute("SELECT id FROM clientes WHERE n_contrato = %s", (n_contrato,))
         cliente = cur.fetchone()
         if cliente:
             cur.execute("""
-                UPDATE clientes SET n_documento=%s, nombre_apellido=%s, telefono=%s, direccion_servicio=%s,
-                nodo=%s, mbps_contratados=%s, estatus_usuario=%s
+                UPDATE clientes SET
+                    n_documento=%s,
+                    nombre_apellido=%s,
+                    telefono=%s,
+                    direccion_servicio=%s,
+                    nodo=%s,
+                    mbps_contratados=%s,
+                    estatus_usuario=%s
                 WHERE id=%s
-            """, (n_documento, nombre,
-                  datos.get('telefono','').strip(), datos.get('direccion_servicio','').strip(),
-                  datos.get('nodo','').strip(), datos.get('mbps_contratados','').strip(),
-                  datos.get('estatus_usuario','').strip(), cliente['id']))
+            """, (
+                n_documento,
+                nombre,
+                datos.get('telefono','').strip(),
+                datos.get('direccion_servicio','').strip(),
+                datos.get('nodo','').strip(),
+                datos.get('mbps_contratados','').strip(),
+                datos.get('estatus_usuario','').strip(),
+                cliente['id']
+            ))
             conn.commit()
             cur.close()
-            invalidar_cache()
             return 'updated'
         else:
             cur.execute("""
                 INSERT INTO clientes (n_contrato, n_documento, nombre_apellido, telefono, direccion_servicio, nodo, mbps_contratados, estatus_usuario)
                 VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
-            """, (n_contrato, n_documento, nombre,
-                  datos.get('telefono','').strip(), datos.get('direccion_servicio','').strip(),
-                  datos.get('nodo','').strip(), datos.get('mbps_contratados','').strip(),
-                  datos.get('estatus_usuario','').strip()))
+            """, (
+                n_contrato,
+                n_documento,
+                nombre,
+                datos.get('telefono','').strip(),
+                datos.get('direccion_servicio','').strip(),
+                datos.get('nodo','').strip(),
+                datos.get('mbps_contratados','').strip(),
+                datos.get('estatus_usuario','').strip()
+            ))
             conn.commit()
             cur.close()
-            invalidar_cache()
+            return 'inserted'
+    else:
+        # Sin contrato: verificar por documento y nombre (sin contrato)
+        if n_documento:
+            cur.execute("""
+                SELECT id FROM clientes
+                WHERE n_documento = %s AND nombre_apellido = %s AND (n_contrato IS NULL OR n_contrato = '')
+                LIMIT 1
+            """, (n_documento, nombre))
+            cliente_sin_contrato = cur.fetchone()
+        else:
+            cliente_sin_contrato = None
+
+        if cliente_sin_contrato:
+            cur.execute("""
+                UPDATE clientes SET
+                    telefono=%s,
+                    direccion_servicio=%s,
+                    nodo=%s,
+                    mbps_contratados=%s,
+                    estatus_usuario=%s
+                WHERE id=%s
+            """, (
+                datos.get('telefono','').strip(),
+                datos.get('direccion_servicio','').strip(),
+                datos.get('nodo','').strip(),
+                datos.get('mbps_contratados','').strip(),
+                datos.get('estatus_usuario','').strip(),
+                cliente_sin_contrato['id']
+            ))
+            conn.commit()
+            cur.close()
+            return 'updated'
+        else:
+            # Insertar nuevo sin contrato
+            cur.execute("""
+                INSERT INTO clientes (n_contrato, n_documento, nombre_apellido, telefono, direccion_servicio, nodo, mbps_contratados, estatus_usuario)
+                VALUES ('',%s,%s,%s,%s,%s,%s,%s)
+            """, (
+                n_documento,
+                nombre,
+                datos.get('telefono','').strip(),
+                datos.get('direccion_servicio','').strip(),
+                datos.get('nodo','').strip(),
+                datos.get('mbps_contratados','').strip(),
+                datos.get('estatus_usuario','').strip()
+            ))
+            conn.commit()
+            cur.close()
             return 'inserted'
 
 # ============================================================
@@ -531,6 +565,8 @@ def procesar_fila_datos(fila, mapeo, tipo):
             val = str(val).strip()
         elif isinstance(val, str):
             val = val.strip()
+        else:
+            val = ''
 
         # Procesar según campo
         if campo == 'fecha':
@@ -794,8 +830,10 @@ def clientes():
         return redirect(url_for('dashboard'))
     conn = get_db()
     cur = conn.cursor()
-    cur.execute("SELECT * FROM clientes ORDER BY creado_en DESC LIMIT 500")
+    cur.execute("SELECT * FROM clientes ORDER BY creado_en DESC")
     clientes = cur.fetchall()
+    for c in clientes:
+        c['zona_inicial'] = determinar_zona(c.get('nodo', ''))
     cur.execute("SELECT DISTINCT nodo FROM clientes WHERE nodo IS NOT NULL AND nodo != '' ORDER BY nodo")
     nodos = [n['nodo'] for n in cur.fetchall()]
     cur.close()
@@ -849,43 +887,57 @@ def cargar_clientes():
     if current_user.rol not in ('admin', 'cor'):
         flash('Acceso denegado', 'danger')
         return redirect(url_for('dashboard'))
+
     if request.method == 'POST':
         archivo = request.files['archivo']
         if not archivo:
             flash('No se seleccionó archivo', 'danger')
             return redirect(url_for('clientes'))
+
         ext = os.path.splitext(archivo.filename)[1].lower()
         if ext not in ['.xlsx', '.xls', '.csv']:
             flash('Solo se permiten archivos .xlsx, .xls y .csv', 'danger')
             return redirect(url_for('clientes'))
+
         temp = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
         archivo.save(temp.name)
         temp.close()
+
         try:
             filas = leer_archivo_datos(temp.name, ext)
             try:
                 os.unlink(temp.name)
             except Exception as e:
                 print(f"Advertencia: no se pudo eliminar {temp.name}: {e}")
+
             if not filas:
                 flash('El archivo está vacío', 'danger')
                 return redirect(url_for('clientes'))
+
             mapeo, tipo = mapear_columnas(filas, CAMPOS_CLIENTES, SINONIMOS)
             if tipo != 'clientes' or not mapeo:
                 flash('No se pudieron identificar las columnas como clientes. Verifica el archivo.', 'danger')
                 return redirect(url_for('clientes'))
+
             conn = get_db()
             cur = conn.cursor()
             insertados = 0
             actualizados = 0
             errores = 0
-            for fila in filas[1:]:
-                if not any(fila):
+            sin_nombre = 0
+
+            for idx, fila in enumerate(filas[1:], start=2):
+                # Saltar solo filas completamente vacías
+                if not any(cell not in (None, '') for cell in fila):
                     continue
+
                 datos = procesar_fila_datos(fila, mapeo, 'clientes')
+
+                # Si no hay nombre, usar valor temporal para no omitir el registro
                 if not datos.get('nombre_apellido'):
-                    errores += 1
-                    continue
+                    datos['nombre_apellido'] = 'Sin nombre'
+                    sin_nombre += 1
+
                 resultado = guardar_cliente(datos)
                 if resultado == 'inserted':
                     insertados += 1
@@ -893,16 +945,31 @@ def cargar_clientes():
                     actualizados += 1
                 else:
                     errores += 1
+
+            conn.commit()
             cur.close()
-            flash(f'Clientes importados: {insertados} nuevos, {actualizados} actualizados, {errores} errores.', 'success')
+            invalidar_cache()
+
+            mensaje = f'Clientes importados: {insertados} nuevos, {actualizados} actualizados, {errores} errores.'
+            if sin_nombre:
+                mensaje += f' ({sin_nombre} sin nombre asignados como "Sin nombre")'
+            flash(mensaje, 'success')
         except Exception as e:
             try:
                 os.unlink(temp.name)
             except Exception:
                 pass
             flash(f'Error al procesar el archivo: {str(e)}', 'danger')
+
         return redirect(url_for('clientes'))
+
     return redirect(url_for('clientes'))
+
+@app.route('/limpiar_errores_importacion', methods=['POST'])
+def limpiar_errores_importacion():
+    session.pop('errores_importacion', None)
+    session.pop('resultado_importacion', None)
+    return '', 204
 
 @app.route('/agregar_cliente', methods=['POST'])
 @login_required
@@ -1585,7 +1652,7 @@ def eliminar_tecnico(id):
 # ============================================================
 #   DUPLICADOS
 # ============================================================
-@app.route('/admin/duplicados')
+##@app.route('/admin/duplicados')
 @login_required
 def admin_duplicados():
     if current_user.rol not in ('admin', 'cor'):
@@ -1621,7 +1688,7 @@ def admin_duplicados():
     cur.close()
     return render_template('admin_duplicados.html', duplicados=duplicados)
 
-@app.route('/admin/eliminar_duplicados_auto', methods=['POST'])
+###@app.route('/admin/eliminar_duplicados_auto', methods=['POST'])
 @login_required
 def eliminar_duplicados_auto():
     if current_user.rol not in ('admin', 'cor'):

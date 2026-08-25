@@ -3,7 +3,7 @@
 {% block heading %}Clientes{% endblock %}
 
 {% block content %}
-<!-- Card: Agregar cliente -->
+<!-- Agregar cliente -->
 <div class="card">
     <div class="card-header"><i class="fas fa-user-plus"></i> Agregar Cliente</div>
     <div class="card-body">
@@ -49,13 +49,13 @@
                 </select>
             </div>
             <div class="col-12">
-                <button type="submit" class="btn btn-amarillo"><i class="fas fa-save"></i> Agregar</button>
+                <button type="submit" class="btn btn-amarillo"><i class="fas fa-save"></i> Agregar Cliente</button>
             </div>
         </form>
     </div>
 </div>
 
-<!-- Card: Importar -->
+<!-- Importar -->
 <div class="card">
     <div class="card-header"><i class="fas fa-upload"></i> Importar Clientes</div>
     <div class="card-body">
@@ -68,18 +68,31 @@
     </div>
 </div>
 
-<!-- Card: Buscador -->
+<!-- Búsqueda y filtro -->
 <div class="card">
     <div class="card-header"><i class="fas fa-search"></i> Buscar Clientes</div>
     <div class="card-body">
-        <input type="text" id="buscadorClientes" class="form-control" placeholder="Escriba para filtrar por nombre, documento, contrato, teléfono, nodo, dirección..." autocomplete="off">
+        <div class="row g-2">
+            <div class="col-md-8">
+                <input type="text" id="buscadorClientes" class="form-control" placeholder="Escriba para filtrar por nombre, documento, contrato, teléfono, nodo, dirección..." autocomplete="off">
+            </div>
+            <div class="col-md-4">
+                <select id="filtroZonaClientes" class="form-select">
+                    <option value="">Todas las zonas</option>
+                    <option value="C">Caracas (C)</option>
+                    <option value="G">Guatire-Guarenas (G)</option>
+                    <option value="CH">Chuspa (CH)</option>
+                    <option value="sin">Sin nodo</option>
+                </select>
+            </div>
+        </div>
         <div class="mt-2">
             <span id="contadorClientes" class="text-muted small"></span>
         </div>
     </div>
 </div>
 
-<!-- Card: Tabla de clientes -->
+<!-- Tabla de clientes -->
 <div class="card">
     <div class="card-header"><i class="fas fa-list"></i> Lista de Clientes</div>
     <div class="card-body">
@@ -98,67 +111,28 @@
                         <th>Acciones</th>
                     </tr>
                 </thead>
-                <tbody>
+                <tbody id="tablaClientesBody">
                     {% for cliente in clientes %}
-                    <tr>
+                    <tr data-zona="{{ cliente.zona_inicial or 'sin' }}">
                         <td>{{ cliente.id }}</td>
+                        <td>{{ cliente.n_contrato or '<span class="badge-empty">Campo vacío</span>'|safe }}</td>
+                        <td>{{ cliente.nombre_apellido or '<span class="badge-empty">Campo vacío</span>'|safe }}</td>
+                        <td>{{ cliente.n_documento or '<span class="badge-empty">Campo vacío</span>'|safe }}</td>
+                        <td>{{ cliente.telefono or '<span class="badge-empty">Campo vacío</span>'|safe }}</td>
+                        <td>{{ cliente.nodo or '<span class="badge-empty">Campo vacío</span>'|safe }}</td>
+                        <td>{{ cliente.mbps_contratados or '<span class="badge-empty">Campo vacío</span>'|safe }}</td>
                         <td>
-                            {% if cliente.n_contrato %}
-                                {{ cliente.n_contrato }}
-                            {% else %}
-                                <span class="badge bg-secondary">Campo vacío</span>
-                            {% endif %}
-                        </td>
-                        <td>
-                            {% if cliente.nombre_apellido %}
-                                {{ cliente.nombre_apellido }}
-                            {% else %}
-                                <span class="badge bg-secondary">Campo vacío</span>
-                            {% endif %}
-                        </td>
-                        <td>
-                            {% if cliente.n_documento %}
-                                {{ cliente.n_documento }}
-                            {% else %}
-                                <span class="badge bg-secondary">Campo vacío</span>
-                            {% endif %}
-                        </td>
-                        <td>
-                            {% if cliente.telefono %}
-                                {{ cliente.telefono }}
-                            {% else %}
-                                <span class="badge bg-secondary">Campo vacío</span>
-                            {% endif %}
-                        </td>
-                        <td>
-                            {% if cliente.nodo %}
-                                {{ cliente.nodo }}
-                            {% else %}
-                                <span class="badge bg-secondary">Campo vacío</span>
-                            {% endif %}
-                        </td>
-                        <td>
-                            {% if cliente.mbps_contratados %}
-                                {{ cliente.mbps_contratados }}
-                            {% else %}
-                                <span class="badge bg-secondary">Campo vacío</span>
-                            {% endif %}
-                        </td>
-                        <td>
-                            {% if cliente.estatus_usuario %}
-                                <span class="badge {% if cliente.estatus_usuario == 'ACTIVO' %}badge-activo{% elif cliente.estatus_usuario == 'INACTIVO' %}badge-inactivo{% else %}badge-pendiente{% endif %}">
-                                    {{ cliente.estatus_usuario }}
-                                </span>
-                            {% else %}
-                                <span class="badge bg-secondary">Campo vacío</span>
-                            {% endif %}
+                            <span class="badge {% if cliente.estatus_usuario == 'ACTIVO' %}badge-activo{% elif cliente.estatus_usuario == 'INACTIVO' %}badge-inactivo{% else %}badge-pendiente{% endif %}">
+                                {{ cliente.estatus_usuario or '—' }}
+                            </span>
                         </td>
                         <td>
                             <div class="btn-group" role="group">
-                                <a href="/cliente/{{ cliente.id }}" class="btn btn-sm btn-primary" title="Ver"><i class="fas fa-eye"></i></a>
-                                <a href="/cliente/{{ cliente.id }}/editar" class="btn btn-sm btn-success" title="Editar"><i class="fas fa-edit"></i></a>
-                                <form method="POST" action="/cliente/{{ cliente.id }}/eliminar" onsubmit="return confirm('¿Eliminar este cliente?')">
-                                    <button type="submit" class="btn btn-sm btn-danger" title="Eliminar"><i class="fas fa-trash"></i></button>
+                                <a href="/cliente/{{ cliente.id }}" class="btn btn-sm btn-outline-primary" title="Ver"><i class="fas fa-eye"></i></a>
+                                <a href="/cliente/{{ cliente.id }}/editar" class="btn btn-sm btn-outline-success" title="Editar"><i class="fas fa-edit"></i></a>
+                                <a href="/planilla_soporte?cliente_id={{ cliente.id }}" class="btn btn-sm btn-amarillo" title="Generar planilla"><i class="fas fa-file-pdf"></i></a>
+                                <form method="POST" action="/cliente/{{ cliente.id }}/eliminar" onsubmit="return confirm('¿Eliminar este cliente?')" style="display:inline;">
+                                    <button type="submit" class="btn btn-sm btn-outline-danger" title="Eliminar"><i class="fas fa-trash"></i></button>
                                 </form>
                             </div>
                         </td>
@@ -170,51 +144,47 @@
     </div>
 </div>
 
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 <script>
-(function() {
-    function init() {
-        var input = document.getElementById('buscadorClientes');
-        var tabla = document.getElementById('tablaClientes');
-        var contador = document.getElementById('contadorClientes');
-        if (!input || !tabla) return;
-        var filas = tabla.querySelectorAll('tbody tr');
-        var sinResultados = null;
+$(document).ready(function() {
+    // Filtrado local instantáneo
+    function aplicarFiltros() {
+        var texto = $('#buscadorClientes').val().toLowerCase().trim();
+        var zona = $('#filtroZonaClientes').val();
 
-        input.addEventListener('input', function() {
-            var filtro = this.value.toLowerCase().trim();
-            var resultadosVisibles = 0;
-            filas.forEach(function(fila) {
-                var textoFila = fila.textContent.toLowerCase();
-                var coincide = textoFila.indexOf(filtro) !== -1;
-                fila.style.display = coincide ? '' : 'none';
-                if (coincide) resultadosVisibles++;
-            });
-            if (contador) contador.textContent = resultadosVisibles + ' cliente(s) encontrado(s)';
-            var tbody = tabla.querySelector('tbody');
-            if (sinResultados) { sinResultados.remove(); sinResultados = null; }
-            if (resultadosVisibles === 0 && filtro !== '') {
-                sinResultados = document.createElement('tr');
-                sinResultados.innerHTML = '<td colspan="9" class="text-center text-muted">No se encontraron clientes</td>';
-                tbody.appendChild(sinResultados);
+        $('#tablaClientesBody tr').each(function() {
+            var fila = $(this);
+            var contenido = fila.text().toLowerCase();
+            var dataZona = fila.attr('data-zona') || 'sin';
+
+            var coincideTexto = contenido.indexOf(texto) > -1;
+            var coincideZona = (zona === '' || dataZona === zona);
+
+            if (coincideTexto && coincideZona) {
+                fila.show();
+            } else {
+                fila.hide();
             }
         });
-
-        fetch('/api/asignadores')
-            .then(r => r.json())
-            .then(data => {
-                var datalist = document.getElementById('listaAsignadores');
-                if (datalist) {
-                    data.forEach(nombre => {
-                        var option = document.createElement('option');
-                        option.value = nombre;
-                        datalist.appendChild(option);
-                    });
-                }
-            })
-            .catch(e => console.error('Error cargando asignadores:', e));
+        actualizarContador();
     }
-    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
-    else init();
-})();
+
+    function actualizarContador() {
+        var visibles = $('#tablaClientesBody tr:visible').length;
+        $('#contadorClientes').text(visibles + ' cliente(s)');
+    }
+
+    $('#buscadorClientes').on('input', function() {
+        clearTimeout(window.timeoutClientes);
+        window.timeoutClientes = setTimeout(aplicarFiltros, 200);
+    });
+
+    $('#filtroZonaClientes').on('change', function() {
+        aplicarFiltros();
+    });
+
+    // Inicializar contador
+    actualizarContador();
+});
 </script>
 {% endblock %}
