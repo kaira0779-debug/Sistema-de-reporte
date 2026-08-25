@@ -1933,6 +1933,7 @@ def generar_planilla_cliente():
     if current_user.rol not in ('admin', 'cor'):
         flash('Acceso denegado', 'danger')
         return redirect(url_for('dashboard'))
+
     ticket_id = request.form.get('ticket_id', '').strip()
     cliente_id = request.form.get('cliente_id', '').strip()
     tipo_planilla = request.form.get('tipo_planilla', 'soporte').strip().lower()
@@ -1944,6 +1945,7 @@ def generar_planilla_cliente():
     cliente = None
     tecnico = None
 
+    # 1) Si hay ticket_id, cargar datos del ticket y cliente asociado
     if ticket_id:
         cur.execute("SELECT * FROM tickets WHERE id = %s", (ticket_id,))
         ticket = cur.fetchone()
@@ -1952,6 +1954,7 @@ def generar_planilla_cliente():
             flash('Ticket no encontrado', 'danger')
             return redirect(url_for('planilla_soporte'))
 
+        # Obtener cliente del ticket (por nombre o por cliente_id si se pasó)
         if cliente_id:
             cur.execute("SELECT * FROM clientes WHERE id = %s", (cliente_id,))
             cliente = cur.fetchone()
@@ -1959,54 +1962,62 @@ def generar_planilla_cliente():
             cur.execute("SELECT * FROM clientes WHERE nombre_apellido = %s LIMIT 1", (ticket['cliente'],))
             cliente = cur.fetchone()
 
+        # Si no hay cliente, crear uno provisional para el PDF
         if not cliente:
             cliente = {
                 'id': None,
                 'nombre_apellido': ticket.get('cliente', ''),
                 'direccion_servicio': '',
                 'telefono': '',
-                'nodo': '',
+                'nodo': ticket.get('nodo', ''),
                 'mbps_contratados': '',
                 'estatus_usuario': '',
                 'asignador': ''
             }
 
+        # Obtener técnico si está asignado
         if ticket.get('tecnico_id'):
             cur.execute("SELECT id, username, nombre_completo, cedula, telefono FROM trabajadores WHERE id = %s AND rol = 'tecnico'", (ticket['tecnico_id'],))
             tecnico = cur.fetchone()
+
+    # 2) Si no hay ticket_id: solo permitir factibilidad/instalación con cliente manual
     else:
+        if tipo_planilla == 'soporte':
+            cur.close()
+            flash('Debe seleccionar un ticket para generar una planilla de soporte.', 'danger')
+            return redirect(url_for('planilla_soporte'))
+
+        # Para factibilidad/instalación se requiere cliente
         if not cliente_id:
             cur.close()
-            flash('Debe seleccionar un ticket o cliente', 'danger')
+            flash('Debe seleccionar un cliente o ticket.', 'danger')
             return redirect(url_for('planilla_soporte'))
+
         cur.execute("SELECT * FROM clientes WHERE id = %s", (cliente_id,))
         cliente = cur.fetchone()
         if not cliente:
             cur.close()
             flash('Cliente no encontrado', 'danger')
             return redirect(url_for('planilla_soporte'))
-        num_ticket = generar_numero_ticket()
-        ticket = {
-            'num_ticket': num_ticket,
-            'motivo_ticket': '',
-            'tipo_falla': '',
-            'observaciones': '',
-            'cliente': cliente['nombre_apellido']
-        }
 
-    if tipo_planilla != 'soporte':
-        num_ticket = ''
-    else:
-        zona = determinar_zona(ticket.get('nodo', '')) if ticket else ''
+        # No se genera número de ticket para estos tipos
+        ticket = None
+
+    # 3) Preparar número de ticket para el PDF
+    if tipo_planilla == 'soporte' and ticket:
+        zona = determinar_zona(ticket.get('nodo', ''))
         if zona:
-            num_ticket = f"{zona}-{ticket.get('num_ticket', '')}" if ticket.get('num_ticket') else ''
+            num_ticket = f"{zona}-{ticket.get('num_ticket', '')}"
         else:
-            num_ticket = ticket.get('num_ticket', '') if ticket else ''
+            num_ticket = ticket.get('num_ticket', '')
+    else:
+        num_ticket = ''   # factibilidad/instalación no llevan número de ticket
 
     motivo = ticket.get('motivo_ticket', '') if ticket else ''
     tipo_falla = ticket.get('tipo_falla', '') if ticket else ''
     observaciones = ticket.get('observaciones', '') if ticket else ''
 
+    # 4) Generar correlativo para el tipo de planilla
     numero_correlativo = generar_numero_correlativo(tipo_planilla)
 
     try:
