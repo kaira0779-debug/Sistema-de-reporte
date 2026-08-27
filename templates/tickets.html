@@ -48,20 +48,18 @@
                 <div class="col-md-3">
                     <label class="form-label">Status</label>
                     <select name="status" class="form-select">
-                        <option value="Pendiente">Pendiente</option>
-                        <option value="En proceso">En proceso</option>
+                        <option value="Pendiente" selected>Pendiente</option>
                         <option value="Resuelto">Resuelto</option>
-                        <option value="No resuelto">No resuelto</option>
                     </select>
                 </div>
                 <div class="col-md-3">
-                    <label class="form-label">Técnico Asignado</label>
-                    <select name="tecnico_id" id="tecnico_id" class="form-select">
-                        <option value="">-- Seleccione --</option>
+                    <label class="form-label">Técnicos Asignados</label>
+                    <select name="tecnicos_ids" class="form-select" multiple size="3">
                         {% for t in tecnicos %}
                         <option value="{{ t.id }}">{{ t.nombre_completo }} (C.I: {{ t.cedula or 'N/A' }})</option>
                         {% endfor %}
                     </select>
+                    <small class="text-muted">Mantén Ctrl para seleccionar varios</small>
                 </div>
                 <div class="col-12">
                     <label class="form-label">Observaciones</label>
@@ -90,10 +88,7 @@
 
 <!-- Filtro y tabla -->
 <div class="card">
-    <div class="card-header d-flex justify-content-between align-items-center">
-        <span><i class="fas fa-search"></i> Búsqueda de Tickets</span>
-        <span id="actualizacionTicket" class="badge bg-info text-dark">Actualización automática</span>
-    </div>
+    <div class="card-header"><i class="fas fa-search"></i> Búsqueda de Tickets</div>
     <div class="card-body">
         <div class="row g-2">
             <div class="col-md-8">
@@ -129,70 +124,46 @@
                         <th>Tipo Falla</th>
                         <th>Status</th>
                         <th>Responsable</th>
-                        <th>Técnico</th>
+                        <th>Técnicos</th>
                         <th>Acciones</th>
                     </tr>
                 </thead>
                 <tbody id="tablaTicketsBody">
-                    <!-- Se rellena dinámicamente -->
+                    {% for ticket in tickets %}
+                    <tr data-zona="{{ ticket.zona_inicial or 'sin' }}">
+                        <td>
+                            {% if ticket.zona_inicial %}
+                                {{ ticket.zona_inicial }}-{{ ticket.num_ticket }}
+                            {% else %}
+                                <span class="badge bg-secondary">Sin nodo</span>
+                                {{ ticket.num_ticket }}
+                            {% endif %}
+                        </td>
+                        <td>{{ ticket.fecha.strftime('%d/%m/%Y') if ticket.fecha else '' }}</td>
+                        <td>{{ ticket.cliente }}</td>
+                        <td>{{ ticket.motivo_ticket or '—' }}</td>
+                        <td>{{ ticket.tipo_falla or '—' }}</td>
+                        <td>
+                            <span class="badge {% if ticket.status == 'Pendiente' %}badge-danger{% elif ticket.status == 'Resuelto' %}badge-success{% else %}badge-secondary{% endif %}">
+                                {{ ticket.status or '—' }}
+                            </span>
+                        </td>
+                        <td>{{ ticket.responsable_display or '—' }}</td>
+                        <td>{{ ticket.tecnicos_display or '—' }}</td>
+                        <td>
+                            <div class="btn-group" role="group">
+                                <a href="/ticket/{{ ticket.id }}" class="btn btn-sm btn-outline-primary" title="Ver"><i class="fas fa-eye"></i></a>
+                                <a href="/ticket/{{ ticket.id }}/editar" class="btn btn-sm btn-outline-success" title="Editar"><i class="fas fa-edit"></i></a>
+                                <a href="/planilla_soporte?ticket_id={{ ticket.id }}" class="btn btn-sm btn-amarillo" title="Generar planilla"><i class="fas fa-file-pdf"></i></a>
+                                <form method="POST" action="/ticket/{{ ticket.id }}/eliminar" onsubmit="return confirm('¿Eliminar este ticket?')">
+                                    <button type="submit" class="btn btn-sm btn-outline-danger" title="Eliminar"><i class="fas fa-trash"></i></button>
+                                </form>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
                 </tbody>
             </table>
-        </div>
-    </div>
-</div>
-
-<!-- Modal para agregar cliente rápido -->
-<div class="modal fade" id="modalNuevoCliente" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">Agregar Cliente Rápido</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body">
-                <form id="formNuevoCliente">
-                    <div class="mb-3">
-                        <label class="form-label">Nombre *</label>
-                        <input type="text" name="nombre_apellido" id="nuevo_nombre" class="form-control" required>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Documento</label>
-                        <input type="text" name="n_documento" id="nuevo_documento" class="form-control">
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Teléfono</label>
-                        <input type="text" name="telefono" id="nuevo_telefono" class="form-control">
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Dirección</label>
-                        <input type="text" name="direccion_servicio" id="nuevo_direccion" class="form-control">
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Nodo</label>
-                        <input type="text" name="nodo" id="nuevo_nodo" class="form-control" list="listaNodosNuevo">
-                        <datalist id="listaNodosNuevo">
-                            {% for n in nodos %}<option value="{{ n }}">{% endfor %}
-                        </datalist>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Mbps</label>
-                        <input type="text" name="mbps_contratados" id="nuevo_mbps" class="form-control">
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Estatus</label>
-                        <select name="estatus_usuario" id="nuevo_estatus" class="form-select">
-                            <option value="ACTIVO">ACTIVO</option>
-                            <option value="INACTIVO">INACTIVO</option>
-                            <option value="SUSPENDIDO">SUSPENDIDO</option>
-                            <option value="CORTESÍA">CORTESÍA</option>
-                        </select>
-                    </div>
-                </form>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
-                <button type="button" class="btn btn-amarillo" id="btnGuardarClienteRapido"><i class="fas fa-save"></i> Guardar</button>
-            </div>
         </div>
     </div>
 </div>
@@ -215,14 +186,10 @@ $(document).ready(function() {
         if (!nodoCliente) return;
         var existe = false;
         $nodoSelect.find('option').each(function() {
-            if ($(this).val() === nodoCliente) {
-                existe = true;
-                return false;
-            }
+            if ($(this).val() === nodoCliente) { existe = true; return false; }
         });
-        if (existe) {
-            $nodoSelect.val(nodoCliente);
-        } else {
+        if (existe) $nodoSelect.val(nodoCliente);
+        else {
             var nuevaOpcion = new Option(nodoCliente, nodoCliente);
             $nodoSelect.append(nuevaOpcion);
             $nodoSelect.val(nodoCliente);
@@ -231,8 +198,8 @@ $(document).ready(function() {
 
     function seleccionarCliente(cliente) {
         $clienteId.val(cliente.id);
-        $inputCliente.val(cliente.nombre_apellido || cliente.nombre || '');
-        $clienteNombreBusqueda.val(cliente.nombre_apellido || cliente.nombre || '');
+        $inputCliente.val(cliente.nombre);
+        $clienteNombreBusqueda.val(cliente.nombre);
         actualizarNodo(cliente.nodo || '');
         $resultadosClientes.hide().empty();
         $mensajeCliente.text('').hide();
@@ -254,7 +221,6 @@ $(document).ready(function() {
                 var html = '';
                 if (data.length === 0) {
                     html = '<div class="list-group-item text-muted">No se encontraron clientes</div>';
-                    html += '<button type="button" class="btn btn-link w-100 text-start" id="btnAbrirModalCliente"><i class="fas fa-user-plus"></i> Agregar cliente rápido</button>';
                 } else {
                     data.forEach(function(c) {
                         html += '<a href="#" class="list-group-item list-group-item-action cliente-item" data-id="'+c.id+'">';
@@ -263,15 +229,6 @@ $(document).ready(function() {
                     });
                 }
                 $resultadosClientes.html(html).show();
-                // Evento para abrir modal
-                $('#btnAbrirModalCliente').off('click').on('click', function() {
-                    // Rellenar el nombre con lo que se haya escrito
-                    $('#nuevo_nombre').val($inputCliente.val());
-                    // Abrir modal
-                    var modal = new bootstrap.Modal(document.getElementById('modalNuevoCliente'));
-                    modal.show();
-                });
-                // Evento para seleccionar cliente existente
                 $resultadosClientes.find('.cliente-item').off('mousedown').on('mousedown', function(e) {
                     e.preventDefault();
                     var id = $(this).data('id');
@@ -304,141 +261,38 @@ $(document).ready(function() {
         timeoutBusqueda = setTimeout(function() { buscarClientes(texto); }, 300);
     });
 
-    $inputCliente.on('blur', function() {
-        setTimeout(function() { $resultadosClientes.hide(); }, 200);
-    });
-
-    $inputCliente.on('focus', function() {
-        var texto = $(this).val().trim();
-        if (texto.length >= 2) buscarClientes(texto);
-    });
+    $inputCliente.on('blur', function() { setTimeout(function() { $resultadosClientes.hide(); }, 200); });
+    $inputCliente.on('focus', function() { var texto = $(this).val().trim(); if (texto.length >= 2) buscarClientes(texto); });
 
     // ======================
-    // GUARDAR CLIENTE RÁPIDO (AJAX)
+    // FILTRO Y CONTADOR
     // ======================
-    $('#btnGuardarClienteRapido').on('click', function() {
-        var formData = new FormData();
-        formData.append('nombre_apellido', $('#nuevo_nombre').val());
-        formData.append('n_documento', $('#nuevo_documento').val());
-        formData.append('telefono', $('#nuevo_telefono').val());
-        formData.append('direccion_servicio', $('#nuevo_direccion').val());
-        formData.append('nodo', $('#nuevo_nodo').val());
-        formData.append('mbps_contratados', $('#nuevo_mbps').val());
-        formData.append('estatus_usuario', $('#nuevo_estatus').val());
-
-        $.ajax({
-            url: '/api/agregar_cliente_ajax',
-            type: 'POST',
-            data: formData,
-            processData: false,
-            contentType: false,
-            success: function(response) {
-                if (response.success) {
-                    // Rellenar campo de cliente en el ticket
-                    seleccionarCliente({
-                        id: response.cliente.id,
-                        nombre_apellido: response.cliente.nombre_apellido,
-                        nodo: response.cliente.nodo || ''
-                    });
-                    // Cerrar modal
-                    var modal = bootstrap.Modal.getInstance(document.getElementById('modalNuevoCliente'));
-                    modal.hide();
-                    // Limpiar campos del modal
-                    $('#formNuevoCliente')[0].reset();
-                } else {
-                    alert('Error: ' + (response.error || 'No se pudo guardar'));
-                }
-            },
-            error: function(xhr) {
-                var errorMsg = 'Error de conexión';
-                if (xhr.responseJSON && xhr.responseJSON.error) {
-                    errorMsg = xhr.responseJSON.error;
-                }
-                alert(errorMsg);
-            }
+    function aplicarFiltros() {
+        var texto = $('#buscadorTickets').val().toLowerCase().trim();
+        var zona = $('#filtroZona').val();
+        $('#tablaTicketsBody tr').each(function() {
+            var fila = $(this);
+            var contenido = fila.text().toLowerCase();
+            var dataZona = fila.attr('data-zona') || 'sin';
+            var matchTexto = contenido.indexOf(texto) > -1;
+            var matchZona = (zona === '' || dataZona === zona);
+            fila.toggle(matchTexto && matchZona);
         });
-    });
-
-    // ======================
-    // FILTRO Y BÚSQUEDA DE TICKETS
-    // ======================
-    function renderTickets(tickets) {
-        let html = '';
-        if (tickets.length === 0) {
-            html = '<tr><td colspan="9" class="text-center text-muted">No se encontraron tickets</td></tr>';
-        } else {
-            tickets.forEach(ticket => {
-                const fecha = ticket.fecha ? new Date(ticket.fecha).toLocaleDateString('es-ES') : '';
-                const zona = ticket.zona_inicial || '';
-                const displayNum = zona ? `${zona}-${ticket.num_ticket}` : ticket.num_ticket;
-                const statusClass = {
-                    'Pendiente': 'badge-warning',
-                    'En proceso': 'badge-info',
-                    'Resuelto': 'badge-success',
-                    'No resuelto': 'badge-danger'
-                }[ticket.status] || 'badge-secondary';
-
-                html += `<tr data-zona="${zona || 'sin'}">
-                    <td>
-                        ${displayNum}
-                    </td>
-                    <td>${fecha}</td>
-                    <td>${ticket.cliente || ''}</td>
-                    <td>${ticket.motivo_ticket || ''}</td>
-                    <td>${ticket.tipo_falla || ''}</td>
-                    <td><span class="badge ${statusClass}">${ticket.status || ''}</span></td>
-                    <td>${ticket.responsable_display || '—'}</td>
-                    <td>${ticket.tecnico_nombre || '—'}</td>
-                    <td>
-                        <div class="btn-group" role="group">
-                            <a href="/ticket/${ticket.id}" class="btn btn-sm btn-outline-primary" title="Ver"><i class="fas fa-eye"></i></a>
-                            <a href="/ticket/${ticket.id}/editar" class="btn btn-sm btn-outline-success" title="Editar"><i class="fas fa-edit"></i></a>
-                            <a href="/planilla_soporte?ticket_id=${ticket.id}" class="btn btn-sm btn-amarillo" title="Generar planilla"><i class="fas fa-file-pdf"></i></a>
-                            <form method="POST" action="/ticket/${ticket.id}/eliminar" onsubmit="return confirm('¿Eliminar este ticket?')">
-                                <button type="submit" class="btn btn-sm btn-outline-danger" title="Eliminar"><i class="fas fa-trash"></i></button>
-                            </form>
-                        </div>
-                    </td>
-                </tr>`;
-            });
-        }
-        $('#tablaTicketsBody').html(html);
         actualizarContador();
     }
 
-    function cargarTickets() {
-        const q = $('#buscadorTickets').val().trim();
-        const zona = $('#filtroZona').val();
-        let url = '/api/buscar_tickets_json?q=' + encodeURIComponent(q);
-        $.get(url)
-            .done(function(data) {
-                if (zona !== '') {
-                    data = data.filter(t => t.zona_inicial === zona || (zona === 'sin' && !t.zona_inicial));
-                }
-                renderTickets(data);
-            })
-            .fail(function() {
-                $('#tablaTicketsBody').html('<tr><td colspan="9" class="text-center text-muted">No se pudieron cargar los tickets</td></tr>');
-            });
-    }
-
     function actualizarContador() {
-        const visibles = $('#tablaTicketsBody tr:visible').length;
+        var visibles = $('#tablaTicketsBody tr:visible').length;
         $('#contadorTickets').text(visibles + ' ticket(s)');
     }
 
-    $('#filtroZona').on('change', function() {
-        cargarTickets();
-    });
-
     $('#buscadorTickets').on('input', function() {
-        clearTimeout(timeoutBusqueda);
-        timeoutBusqueda = setTimeout(cargarTickets, 300);
+        clearTimeout(window.timeoutFiltro);
+        window.timeoutFiltro = setTimeout(aplicarFiltros, 200);
     });
+    $('#filtroZona').on('change', aplicarFiltros);
 
-    // Cargar inicial
-    cargarTickets();
-    setInterval(cargarTickets, 10000);
+    actualizarContador();
 });
 </script>
 {% endblock %}

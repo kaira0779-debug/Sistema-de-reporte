@@ -37,35 +37,21 @@
             <div class="col-md-6">
                 <label class="form-label">Status</label>
                 <select name="status" class="form-select">
-                    {% for e in estados %}
-                    <option value="{{ e }}" {% if ticket.status == e %}selected{% endif %}>{{ e }}</option>
-                    {% endfor %}
+                    <option value="Pendiente" {% if ticket.status == 'Pendiente' %}selected{% endif %}>Pendiente</option>
+                    <option value="Resuelto" {% if ticket.status == 'Resuelto' %}selected{% endif %}>Resuelto</option>
                 </select>
             </div>
             <div class="col-md-6">
-                <label class="form-label">Técnico Asignado</label>
-                <select name="tecnico_id" class="form-select">
-                    <option value="">-- Seleccione --</option>
+                <label class="form-label">Técnicos Asignados</label>
+                <select name="tecnicos_ids" class="form-select" multiple size="4">
                     {% for t in tecnicos %}
-                    <option value="{{ t.id }}" {% if ticket.tecnico_id == t.id %}selected{% endif %}>{{ t.nombre_completo }}</option>
+                    <option value="{{ t.id }}" {% if t.id in tecnicos_asignados %}selected{% endif %}>
+                        {{ t.nombre_completo }} (C.I: {{ t.cedula or 'N/A' }})
+                    </option>
                     {% endfor %}
                 </select>
+                <small class="text-muted">Mantén Ctrl para seleccionar varios</small>
             </div>
-            {% if not ticket.responsable %}
-            <div class="col-md-6">
-                <label class="form-label">Responsable</label>
-                <select name="responsable" class="form-select">
-                    <option value="">-- Seleccione --</option>
-                    <option value="Yanibel Martinez">Yanibel Martinez</option>
-                    <option value="Jhon Giraldo">Jhon Giraldo</option>
-                    <option value="Andres Reyes">Andres Reyes</option>
-                    {% for c in cor_users %}
-                    <option value="{{ c.nombre_completo }}">{{ c.nombre_completo }}</option>
-                    {% endfor %}
-
-                </select>
-            </div>
-            {% endif %}
             <div class="col-12">
                 <label class="form-label">Observaciones</label>
                 <textarea name="observaciones" class="form-control" rows="3">{{ ticket.observaciones or '' }}</textarea>

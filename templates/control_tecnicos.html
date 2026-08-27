@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% block title %}Control por Técnico{% endblock %}
+{% block heading %}Control por Técnico{% endblock %}
+
+{% block extra_css %}
+<style>
+    .chart-container {
+        position: relative;
+        height: 300px;
+        width: 100%;
+        margin-bottom: 20px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header"><i class="fas fa-chart-bar"></i> Control por Técnico</div>
+    <div class="card-body">
+        <form method="GET" action="{{ url_for('control_tecnicos') }}" class="row g-3 align-items-end">
+            <div class="col-auto">
+                <label class="form-label">Mes a visualizar</label>
+                <select name="mes" class="form-select">
+                    {% for m in meses_disponibles %}
+                    <option value="{{ m }}" {% if m == mes_actual %}selected{% endif %}>{{ m }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-auto">
+                <button type="submit" class="btn btn-amarillo">Filtrar</button>
+            </div>
+        </form>
+
+        <!-- Gráfica de barras -->
+        <div class="chart-container mt-4">
+            <canvas id="graficaTecnicos"></canvas>
+        </div>
+
+        <!-- Tabla de detalle -->
+        <div class="table-responsive mt-4">
+            <table class="table table-hover align-middle">
+                <thead>
+                    <tr>
+                        <th>Técnico</th>
+                        <th>Total Mes</th>
+                        {% for dia in range(1, 31) %}
+                            <th>{{ dia }}</th>
+                        {% endfor %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for r in resumen %}
+                    <tr>
+                        <td>{{ r.tecnico.nombre_completo }}</td>
+                        <td><strong>{{ r.total_mes }}</strong></td>
+                        {% for dia in range(1, 31) %}
+                            <td>{{ r.conteo_diario.get(dia, 0) }}</td>
+                        {% endfor %}
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+$(document).ready(function() {
+    var ctx = document.getElementById('graficaTecnicos').getContext('2d');
+    var labels = [];
+    var dataTotales = [];
+    {% for r in resumen %}
+        labels.push("{{ r.tecnico.nombre_completo }}");
+        dataTotales.push({{ r.total_mes }});
+    {% endfor %}
+
+    new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'Tickets Asignados (Mes)',
+                data: dataTotales,
+                backgroundColor: 'rgba(241, 196, 15, 0.7)',
+                borderColor: 'rgba(0, 0, 0, 1)',
+                borderWidth: 1
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    ticks: { stepSize: 1 }
+                }
+            },
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            return ' ' + context.parsed.y + ' ticket(s)';
+                        }
+                    }
+                }
+            }
+        }
+    });
+});
+</script>
+{% endblock %}

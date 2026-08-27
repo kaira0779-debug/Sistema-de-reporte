@@ -62,7 +62,7 @@
                     <tr>
                         <th>Status</th>
                         <td>
-                            <span class="badge {% if ticket.status == 'Pendiente' %}badge-warning{% elif ticket.status == 'En proceso' %}badge-info{% elif ticket.status == 'Resuelto' %}badge-success{% else %}badge-danger{% endif %}">
+                            <span class="badge {% if ticket.status == 'Pendiente' %}badge-danger{% elif ticket.status == 'Resuelto' %}badge-success{% else %}badge-secondary{% endif %}">
                                 {{ ticket.status }}
                             </span>
                         </td>
@@ -72,15 +72,8 @@
                         <td>{{ ticket.responsable_display or '—' }}</td>
                     </tr>
                     <tr>
-                        <th>Técnico Asignado</th>
-                        <td>
-                            {% if ticket.tecnico_nombre %}
-                                {{ ticket.tecnico_nombre }}
-                                (C.I: {{ ticket.tecnico_cedula or 'N/A' }}, Tel: {{ ticket.tecnico_telefono or 'N/A' }})
-                            {% else %}
-                                —
-                            {% endif %}
-                        </td>
+                        <th>Técnicos Asignados</th>
+                        <td>{{ ticket.tecnicos_display }}</td>
                     </tr>
                 </table>
             </div>

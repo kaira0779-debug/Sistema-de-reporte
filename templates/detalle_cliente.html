@@ -54,10 +54,6 @@
                     </p>
                 </div>
                 <div class="info-group">
-                    <h6 class="info-label"><i class="fas fa-user-tag me-2" style="color: var(--primary);"></i>Asignador</h6>
-                    <p class="info-value">{{ cliente.asignador or '—' }}</p>
-                </div>
-                <div class="info-group">
                     <h6 class="info-label"><i class="fas fa-calendar-plus me-2" style="color: var(--primary);"></i>Fecha de registro</h6>
                     <p class="info-value">{{ cliente.creado_en.strftime('%d/%m/%Y %H:%M') if cliente.creado_en else '—' }}</p>
                 </div>

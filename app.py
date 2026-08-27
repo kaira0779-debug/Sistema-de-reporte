@@ -7,7 +7,8 @@ import subprocess
 import datetime
 import atexit
 import shutil
-from datetime import datetime
+from datetime import datetime, timedelta
+import calendar
 from functools import lru_cache
 from time import time
 from flask import Flask, render_template, request, redirect, url_for, flash, session, g, jsonify, send_from_directory
@@ -385,7 +386,7 @@ def guardar_cliente(datos):
 #   LECTURA Y MAPEO DE ARCHIVOS
 # ============================================================
 CAMPOS_CLIENTES = [
-    'n_contrato', 'n_documento', 'nombre_apellido', 'telefono',
+    'id', 'n_contrato', 'n_documento', 'nombre_apellido', 'telefono',
     'direccion_servicio', 'nodo', 'mbps_contratados', 'estatus_usuario'
 ]
 
@@ -412,7 +413,8 @@ SINONIMOS = {
     'departamento': ['área', 'departamento', 'unidad', 'gerencia'],
     'status': ['estado', 'estatus', 'situación', 'condición'],
     'responsable': ['técnico', 'responsable', 'asignado a', 'encargado', 'personal'],
-    'observaciones': ['observación', 'notas', 'comentarios', 'detalles', 'adicional']
+    'observaciones': ['observación', 'notas', 'comentarios', 'detalles', 'adicional'],
+    'id': ['id', 'codigo', 'código', 'nro', 'numero']
 }
 
 def normalizar_texto(texto):
@@ -421,6 +423,41 @@ def normalizar_texto(texto):
     texto = re.sub(r'[^a-z0-9 ]', ' ', texto)
     texto = re.sub(r'\s+', ' ', texto).strip()
     return texto
+
+def mapear_columnas(filas, campos_esperados, sinonimos):
+    if not filas:
+        return None, None
+    header = [str(c).strip() if c is not None else '' for c in filas[0]]
+    header_norm = [normalizar_texto(h) for h in header]
+    mapeo = {}
+    usado = set()
+    for campo in campos_esperados:
+        sinonimos_campo = sinonimos.get(campo, [])
+        candidatos = [campo] + sinonimos_campo
+        candidatos_norm = [normalizar_texto(c) for c in candidatos]
+        mejor_idx = None
+        mejor_score = 0
+        for idx, col_norm in enumerate(header_norm):
+            if idx in usado:
+                continue
+            for cand in candidatos_norm:
+                if col_norm == cand:
+                    score = 1.0
+                else:
+                    score = difflib.SequenceMatcher(None, col_norm, cand).ratio()
+                if cand in col_norm:
+                    score += 0.2
+                if score > mejor_score:
+                    mejor_score = score
+                    mejor_idx = idx
+        if mejor_idx is not None and mejor_score >= 0.6:
+            mapeo[campo] = mejor_idx
+            usado.add(mejor_idx)
+    # Determinar tipo
+    campos_clientes_mapped = sum(1 for c in CAMPOS_CLIENTES if c in mapeo)
+    campos_tickets_mapped = sum(1 for c in CAMPOS_TICKETS if c in mapeo)
+    tipo = 'clientes' if campos_clientes_mapped >= campos_tickets_mapped else 'tickets'
+    return mapeo, tipo
 
 def detectar_delimitador(archivo):
     with open(archivo, 'rb') as f:
@@ -460,9 +497,17 @@ def leer_archivo_datos(filepath, extension):
                         if cell is None:
                             fila.append('')
                         elif isinstance(cell, datetime):
-                            fila.append(cell)          # Mantener fecha como datetime
+                            # Fecha real (datetime): convertir a string exacto
+                            fila.append(cell.strftime('%Y-%m-%d'))
                         elif isinstance(cell, (int, float)):
-                            fila.append(cell)          # Mantener número
+                            # Número serial de Excel
+                            if cell > 59:   # Evitar 0,1,2 que no son fechas
+                                base = datetime(1899, 12, 30)
+                                delta = timedelta(days=int(cell))
+                                fecha = base + delta
+                                fila.append(fecha.strftime('%Y-%m-%d'))
+                            else:
+                                fila.append(str(cell).strip())
                         else:
                             fila.append(str(cell).strip())
                     datos.append(fila)
@@ -470,7 +515,6 @@ def leer_archivo_datos(filepath, extension):
         finally:
             wb.close()
     else:
-        # Para CSV
         with open(filepath, 'rb') as f:
             raw = f.read(10000)
             encoding = chardet.detect(raw)['encoding'] or 'utf-8-sig'
@@ -491,43 +535,6 @@ def leer_archivo_datos(filepath, extension):
                             break
             return [[cell.strip() if isinstance(cell, str) else cell for cell in row] for row in filas if any(cell is not None for cell in row)]
 
-def mapear_columnas(filas, campos_esperados, sinonimos):
-    if not filas:
-        return None, None
-    header = [str(c).strip() for c in filas[0]]
-    header_norm = [normalizar_texto(h) for h in header]
-    mapeo = {}
-    usado = set()
-    for campo in campos_esperados:
-        sinonimos_campo = sinonimos.get(campo, [])
-        candidatos = [campo] + sinonimos_campo
-        candidatos_norm = [normalizar_texto(c) for c in candidatos]
-        mejor_idx = None
-        mejor_score = 0
-        for idx, col_norm in enumerate(header_norm):
-            if idx in usado:
-                continue
-            for cand in candidatos_norm:
-                if col_norm == cand:
-                    score = 1.0
-                else:
-                    score = difflib.SequenceMatcher(None, col_norm, cand).ratio()
-                if cand in col_norm:
-                    score += 0.2
-                if score > mejor_score:
-                    mejor_score = score
-                    mejor_idx = idx
-        if mejor_idx is not None and mejor_score >= 0.6:
-            mapeo[campo] = mejor_idx
-            usado.add(mejor_idx)
-    campos_clientes_mapped = sum(1 for c in CAMPOS_CLIENTES if c in mapeo)
-    campos_tickets_mapped = sum(1 for c in CAMPOS_TICKETS if c in mapeo)
-    if campos_clientes_mapped >= campos_tickets_mapped:
-        tipo = 'clientes'
-    else:
-        tipo = 'tickets'
-    return mapeo, tipo
-
 def convertir_fecha(valor):
     if not valor:
         return None
@@ -547,8 +554,33 @@ def convertir_fecha(valor):
                 return dt.strftime('%Y-%m-%d')
             except ValueError:
                 continue
+        # Si es número en texto
+        try:
+            serial = float(valor)
+            base = datetime(1899, 12, 30)
+            delta = timedelta(days=int(serial))
+            fecha = base + delta
+            return fecha.strftime('%Y-%m-%d')
+        except ValueError:
+            pass
         return None
+    if isinstance(valor, (int, float)):
+        base = datetime(1899, 12, 30)
+        delta = timedelta(days=int(valor))
+        fecha = base + delta
+        return fecha.strftime('%Y-%m-%d')
     return None
+
+def convertir_fecha_serial(serial):
+    """Convierte un número serial de Excel a fecha (sistema 1900)."""
+    try:
+        # Excel tiene un bug con 1900 como bisiesto; se corrige restando 2 desde 1900-01-01
+        base = datetime(1899, 12, 30)
+        delta = timedelta(days=int(serial))
+        fecha = base + delta
+        return fecha.strftime('%Y-%m-%d')
+    except Exception:
+        return None
 
 def procesar_fila_datos(fila, mapeo, tipo):
     datos = {}
@@ -558,25 +590,24 @@ def procesar_fila_datos(fila, mapeo, tipo):
         else:
             val = ''
 
-        # Si es datetime, convertir a string
         if isinstance(val, datetime):
             val = val.strftime('%Y-%m-%d')
         elif isinstance(val, (int, float)):
             val = str(val).strip()
         elif isinstance(val, str):
             val = val.strip()
-        else:
-            val = ''
 
-        # Procesar según campo
         if campo == 'fecha':
-            val = convertir_fecha(val) if val else ''
+            # Ya está en formato YYYY-MM-DD si viene de leer_archivo_datos
+            if isinstance(val, str) and re.match(r'^\d{4}-\d{2}-\d{2}$', val):
+                pass
+            else:
+                val = convertir_fecha(val)
         elif campo in ['n_contrato', 'n_documento', 'telefono', 'mbps_contratados']:
             if isinstance(val, str):
                 val = re.sub(r'[^\w\-\.\+]', '', val)
         datos[campo] = val
 
-    # Asegurar que campos vacíos sean ''
     for c in CAMPOS_CLIENTES + CAMPOS_TICKETS:
         datos.setdefault(c, '')
     return datos
@@ -586,9 +617,9 @@ def procesar_fila_datos(fila, mapeo, tipo):
 # ============================================================
 NODOS_GUATIRE_GUARENAS = {
     'APAMATES', 'ARAIRA', 'BARRIO SOJO', 'BUENAVENTURA SUITES', 'CANAIMA',
-    'DORAL', 'EL INGENIO', 'HUMBOLDT', 'IZCARAGUA',
+    'DORAL', 'EL INGENIO', 'HUMBOLDT', 'HUMBOLT','IZCARAGUA',
     'LA ESPERANZA', 'LA PARADA', 'LA SABANA', 'LA VILLA', 'LAS ACACIAS',
-    'LOMAS DE ARAIRA', 'LOS NARANJOS', 'MARGARITA', 'MENCA', 'NARANJOS',
+    'LOMAS DE ARAIRA', 'LOS NARANJOS', 'MARGARITA', 'MENCA', 'NARANJOS-G',
     'OROPEZA', 'PADRE SOJO', 'PARQUE HABITAD', 'REFUGIO',
     'SAN MARTIN DE PORRRA', 'TERRINCA', 'VAQUERA', 'VILLA AVILA',
     'VILLA GPON', 'LA VAQUERA', 'SAN MARTIN DE PORRAS'
@@ -598,7 +629,7 @@ NODOS_CARACAS = {
     'Acuario', 'Valle Abajo', 'MARCONI', 'Torre centro Boyaca', 'SAMANES',
     'Vista Alegre', 'El Valle - San Antonio', 'SANTA FE', 'Venevision', 'San agustin',
     'El Tope', 'Petare', 'Senderos', 'Ciudad Tiuna', 'Torre Domus',
-    'Plaza las Americas', 'Naranjos', 'Torre Britanica',
+    'Plaza las Americas', 'NARANJOS-C', 'Torre Britanica',
     'MACARACUAY', 'Palo Verde', 'ALAMEDA', 'BORDE QUINTA', 'VNET',
     'LOS TEQUES'
 }
@@ -1120,35 +1151,31 @@ def tickets():
     conn = get_db()
     cur = conn.cursor()
     cur.execute("""
-        SELECT t.*, tec.nombre_completo as tecnico_nombre, uc.nombre_completo as cor_nombre
+        SELECT t.*, uc.nombre_completo AS cor_nombre,
+               (SELECT GROUP_CONCAT(te.nombre_completo SEPARATOR ', ')
+                FROM ticket_tecnicos tt
+                JOIN trabajadores te ON tt.tecnico_id = te.id
+                WHERE tt.ticket_id = t.id) AS tecnicos_nombres
         FROM tickets t
-        LEFT JOIN trabajadores tec ON t.tecnico_id = tec.id
         LEFT JOIN usuarios_cor uc ON t.cor_id = uc.id
         ORDER BY t.fecha DESC, t.num_ticket DESC
-        LIMIT 500
     """)
     tickets = cur.fetchall()
     for t in tickets:
         t['zona_inicial'] = determinar_zona(t.get('nodo', ''))
         t['responsable_display'] = t.get('cor_nombre') or t.get('responsable') or ''
+        t['tecnicos_display'] = t.get('tecnicos_nombres') or '—'
 
     cur.execute("SELECT DISTINCT nodo FROM clientes WHERE nodo IS NOT NULL AND nodo != '' UNION SELECT DISTINCT nodo FROM tickets WHERE nodo IS NOT NULL AND nodo != '' ORDER BY nodo")
     nodos = [row['nodo'] for row in cur.fetchall()]
-
     cur.execute("SELECT DISTINCT motivo_ticket FROM tickets WHERE motivo_ticket IS NOT NULL AND motivo_ticket != '' ORDER BY motivo_ticket")
     motivos = [row['motivo_ticket'] for row in cur.fetchall()]
-
     cur.execute("SELECT DISTINCT tipo_falla FROM tickets WHERE tipo_falla IS NOT NULL AND tipo_falla != '' ORDER BY tipo_falla")
     tipos_falla = [row['tipo_falla'] for row in cur.fetchall()]
-
     cur.execute("SELECT id, nombre_completo, cedula, telefono FROM trabajadores WHERE rol = 'tecnico' ORDER BY nombre_completo")
     tecnicos = cur.fetchall()
-
-    cur.execute("SELECT id, nombre_completo FROM usuarios_cor ORDER BY nombre_completo")
-    usuarios_cor = cur.fetchall()
-
     cur.close()
-    return render_template('tickets.html', tickets=tickets, nodos=nodos, motivos=motivos, tipos_falla=tipos_falla, tecnicos=tecnicos, usuarios_cor=usuarios_cor)
+    return render_template('tickets.html', tickets=tickets, nodos=nodos, motivos=motivos, tipos_falla=tipos_falla, tecnicos=tecnicos)
 
 @app.route('/api/buscar_tickets_json')
 @login_required
@@ -1179,9 +1206,6 @@ def api_buscar_tickets():
                    OR t.responsable LIKE %s OR t.observaciones LIKE %s
             """
             params.extend([like]*8)
-        sql += " ORDER BY t.fecha DESC, t.num_ticket DESC LIMIT 50"
-    else:
-        sql += " ORDER BY t.fecha DESC, t.num_ticket DESC LIMIT 50"
 
     cur.execute(sql, params)
     tickets = cur.fetchall()
@@ -1290,24 +1314,29 @@ def cargar_tickets():
 
             datos = procesar_fila_datos(fila, mapeo, 'tickets')
 
-            # Validar campos obligatorios
-            if not datos.get('cliente') or not datos.get('fecha'):
-                errores += 1
-                print(f"Fila {idx}: falta cliente o fecha válida. Cliente='{datos.get('cliente')}', Fecha='{datos.get('fecha')}'")
-                continue
-
+            # El ticket número es obligatorio, si no, error
             num_ticket = str(datos.get('num_ticket', '')).strip()
             if not num_ticket:
                 errores += 1
-                print(f"Fila {idx}: num_ticket vacío")
+                print(f"Fila {idx}: falta Nº de Ticket, se omite")
                 continue
 
-            # Verificar si el ticket ya existe (por número de ticket)
+            # Si falta fecha, usar la fecha actual
+            fecha = datos.get('fecha') or datetime.now().strftime('%Y-%m-%d')
+
+            # Asignar responsable si es usuario COR
+            cor_id = None
+            responsable = datos.get('responsable', '').strip()
+            if current_user.rol == 'cor':
+                cor_id = current_user.id
+                if not responsable:
+                    responsable = current_user.nombre_completo
+
+            # Buscar ticket existente por num_ticket
             cur.execute("SELECT id FROM tickets WHERE num_ticket = %s", (num_ticket,))
             ticket_existente = cur.fetchone()
 
             if ticket_existente:
-                # Actualizar el ticket existente
                 cur.execute("""
                     UPDATE tickets SET
                         fecha=%s, nodo=%s, cliente=%s, motivo_ticket=%s,
@@ -1315,7 +1344,7 @@ def cargar_tickets():
                         status=%s, responsable=%s, observaciones=%s, tecnico_id=%s, cor_id=%s
                     WHERE id=%s
                 """, (
-                    datos.get('fecha'),
+                    fecha,
                     datos.get('nodo', ''),
                     datos.get('cliente', ''),
                     datos.get('motivo_ticket', ''),
@@ -1323,10 +1352,10 @@ def cargar_tickets():
                     datos.get('tipo_falla', ''),
                     datos.get('departamento', ''),
                     datos.get('status', 'Pendiente'),
-                    datos.get('responsable', ''),
+                    responsable,
                     datos.get('observaciones', ''),
-                    None,   # tecnico_id se deja NULL en importación
-                    None,   # cor_id se deja NULL, se asignará manualmente si es necesario
+                    None,   # tecnico_id se actualizará manualmente si es necesario
+                    cor_id,
                     ticket_existente['id']
                 ))
                 actualizados += 1
@@ -1335,11 +1364,11 @@ def cargar_tickets():
                 if datos.get('tipo_falla') and 'ap caida' in datos['tipo_falla'].lower():
                     datos['tipo_falla'] = 'AP caída'
                 cur.execute("""
-                    INSERT INTO tickets (fecha, num_ticket, nodo, cliente, motivo_ticket, visita_tecnica, 
+                    INSERT INTO tickets (fecha, num_ticket, nodo, cliente, motivo_ticket, visita_tecnica,
                                         tipo_falla, departamento, status, responsable, observaciones, tecnico_id, cor_id)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NULL,NULL)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NULL,%s)
                 """, (
-                    datos.get('fecha'),
+                    fecha,
                     num_ticket,
                     datos.get('nodo', ''),
                     datos.get('cliente', ''),
@@ -1348,8 +1377,9 @@ def cargar_tickets():
                     datos.get('tipo_falla', ''),
                     datos.get('departamento', ''),
                     datos.get('status', 'Pendiente'),
-                    datos.get('responsable', ''),
-                    datos.get('observaciones', '')
+                    responsable,
+                    datos.get('observaciones', ''),
+                    cor_id
                 ))
                 insertados += 1
 
@@ -1371,15 +1401,18 @@ def agregar_ticket():
     if current_user.rol not in ('admin', 'cor'):
         flash('Acceso denegado', 'danger')
         return redirect(url_for('dashboard'))
+
     nodo = request.form.get('nodo', '').strip()
     cliente_id = request.form.get('cliente_id', '').strip()
     motivo_ticket = request.form.get('motivo_ticket', '').strip()
     visita_tecnica = request.form.get('visita_tecnica', '').strip()
     tipo_falla = request.form.get('tipo_falla', '').strip()
     status = request.form.get('status', 'Pendiente').strip()
-    tecnico_id = request.form.get('tecnico_id', '').strip()
     observaciones = request.form.get('observaciones', '').strip()
     cliente_nombre_busqueda = request.form.get('cliente_nombre_busqueda', '').strip()
+
+    # Lista de técnicos seleccionados (puede ser múltiple)
+    tecnicos_ids = request.form.getlist('tecnicos_ids')
 
     conn = get_db()
     cur = conn.cursor()
@@ -1412,27 +1445,31 @@ def agregar_ticket():
     if re.search(r'ap\s*ca[ií]da', tipo_falla, re.IGNORECASE):
         tipo_falla = 'AP caída'
 
-    tecnico_id = int(tecnico_id) if tecnico_id else None
-
     # Asignación automática de responsable
     if current_user.rol == 'cor':
         responsable = current_user.nombre_completo
         cor_id = current_user.id
     else:
-        responsable = ''  # admin no asigna responsable automáticamente
+        responsable = ''
         cor_id = None
 
     cur.execute("""
         INSERT INTO tickets (fecha, num_ticket, nodo, cliente, motivo_ticket, visita_tecnica, 
                             tipo_falla, departamento, status, responsable, observaciones, tecnico_id, cor_id)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NULL,%s)
     """, (fecha, num_ticket, nodo, cliente_nombre, motivo_ticket, visita_tecnica, 
-          tipo_falla, '', status, responsable, observaciones, tecnico_id, cor_id))
-    conn.commit()
+          tipo_falla, '', status, responsable, observaciones, cor_id))
     ticket_id = cur.lastrowid
+
+    # Insertar relaciones con técnicos
+    for t_id in tecnicos_ids:
+        if t_id:
+            cur.execute("INSERT INTO ticket_tecnicos (ticket_id, tecnico_id) VALUES (%s,%s)", (ticket_id, int(t_id)))
+
+    conn.commit()
     cur.close()
     flash(f'Ticket {num_ticket} agregado correctamente', 'success')
-    return redirect(url_for('planilla_soporte', ticket_id=ticket_id))
+    return redirect(url_for('tickets'))  # Redirigir a lista de tickets, no a planilla
 
 @app.route('/ticket/<int:ticket_id>/eliminar', methods=['POST'])
 @login_required
@@ -1454,13 +1491,16 @@ def detalle_ticket(ticket_id):
     if current_user.rol not in ('admin', 'cor'):
         flash('Acceso denegado', 'danger')
         return redirect(url_for('dashboard'))
+
     conn = get_db()
     cur = conn.cursor()
     cur.execute("""
-        SELECT t.*, tec.nombre_completo as tecnico_nombre, tec.cedula as tecnico_cedula, tec.telefono as tecnico_telefono,
-               uc.nombre_completo as cor_nombre
+        SELECT t.*, uc.nombre_completo AS cor_nombre,
+               (SELECT GROUP_CONCAT(te.nombre_completo SEPARATOR ', ')
+                FROM ticket_tecnicos tt
+                JOIN trabajadores te ON tt.tecnico_id = te.id
+                WHERE tt.ticket_id = t.id) AS tecnicos_nombres
         FROM tickets t
-        LEFT JOIN trabajadores tec ON t.tecnico_id = tec.id
         LEFT JOIN usuarios_cor uc ON t.cor_id = uc.id
         WHERE t.id = %s
     """, (ticket_id,))
@@ -1468,18 +1508,19 @@ def detalle_ticket(ticket_id):
     if ticket:
         ticket['zona_inicial'] = determinar_zona(ticket.get('nodo', ''))
         ticket['responsable_display'] = ticket.get('cor_nombre') or ticket.get('responsable') or ''
+        ticket['tecnicos_display'] = ticket.get('tecnicos_nombres') or '—'
     cur.close()
     if not ticket:
         flash('Ticket no encontrado', 'danger')
         return redirect(url_for('tickets'))
     return render_template('detalle_ticket.html', ticket=ticket)
-
 @app.route('/ticket/<int:ticket_id>/editar', methods=['GET', 'POST'])
 @login_required
 def editar_ticket(ticket_id):
     if current_user.rol not in ('admin', 'cor'):
         flash('Acceso denegado', 'danger')
         return redirect(url_for('dashboard'))
+
     conn = get_db()
     cur = conn.cursor()
     cur.execute("SELECT * FROM tickets WHERE id = %s", (ticket_id,))
@@ -1496,37 +1537,34 @@ def editar_ticket(ticket_id):
         tipo_falla = request.form.get('tipo_falla', '').strip()
         departamento = request.form.get('departamento', '').strip()
         status = request.form.get('status', '').strip()
-        tecnico_id = request.form.get('tecnico_id', '').strip()
         observaciones = request.form.get('observaciones', '').strip()
-
-        # No se permite editar responsable automáticamente; se mantiene el existente.
-        # Si el ticket fue creado por admin (responsable vacío), se puede asignar un responsable opcional desde un select.
-        responsable_nuevo = request.form.get('responsable', '').strip()
-        if ticket.get('responsable') == '' and responsable_nuevo:
-            # Buscar usuario COR por nombre
-            cur.execute("SELECT id, nombre_completo FROM usuarios_cor WHERE nombre_completo = %s", (responsable_nuevo,))
-            cor = cur.fetchone()
-            if cor:
-                cur.execute("UPDATE tickets SET responsable=%s, cor_id=%s WHERE id=%s", (cor['nombre_completo'], cor['id'], ticket_id))
-            else:
-                cur.execute("UPDATE tickets SET responsable=%s WHERE id=%s", (responsable_nuevo, ticket_id))
+        tecnicos_ids = request.form.getlist('tecnicos_ids')
 
         if re.search(r'ap\s*ca[ií]da', tipo_falla, re.IGNORECASE):
             tipo_falla = 'AP caída'
-        tecnico_id = int(tecnico_id) if tecnico_id else None
 
+        # Actualizar ticket principal
         cur.execute("""
             UPDATE tickets SET nodo=%s, motivo_ticket=%s, visita_tecnica=%s, tipo_falla=%s,
-            departamento=%s, status=%s, tecnico_id=%s, observaciones=%s
+            departamento=%s, status=%s, observaciones=%s
             WHERE id=%s
-        """, (nodo, motivo_ticket, visita_tecnica, tipo_falla, departamento, status,
-              tecnico_id, observaciones, ticket_id))
+        """, (nodo, motivo_ticket, visita_tecnica, tipo_falla, departamento, status, observaciones, ticket_id))
+
+        # Actualizar relaciones de técnicos
+        cur.execute("DELETE FROM ticket_tecnicos WHERE ticket_id = %s", (ticket_id,))
+        for t_id in tecnicos_ids:
+            if t_id:
+                cur.execute("INSERT INTO ticket_tecnicos (ticket_id, tecnico_id) VALUES (%s,%s)", (ticket_id, int(t_id)))
+
         conn.commit()
         cur.close()
         flash('Ticket actualizado correctamente', 'success')
         return redirect(url_for('detalle_ticket', ticket_id=ticket_id))
 
-    # GET: cargar listas
+    # Obtener técnicos ya asignados para marcarlos en el formulario
+    cur.execute("SELECT tecnico_id FROM ticket_tecnicos WHERE ticket_id = %s", (ticket_id,))
+    tecnicos_asignados = [row['tecnico_id'] for row in cur.fetchall()]
+
     cur.execute("SELECT DISTINCT nodo FROM clientes WHERE nodo IS NOT NULL AND nodo != '' UNION SELECT DISTINCT nodo FROM tickets WHERE nodo IS NOT NULL AND nodo != '' ORDER BY nodo")
     nodos = [row['nodo'] for row in cur.fetchall()]
     cur.execute("SELECT DISTINCT motivo_ticket FROM tickets WHERE motivo_ticket IS NOT NULL AND motivo_ticket != '' ORDER BY motivo_ticket")
@@ -1535,13 +1573,13 @@ def editar_ticket(ticket_id):
     tipos_falla = [row['tipo_falla'] for row in cur.fetchall()]
     cur.execute("SELECT DISTINCT status FROM tickets WHERE status IS NOT NULL AND status != '' ORDER BY status")
     estados = [row['status'] for row in cur.fetchall()]
-    cur.execute("SELECT id, nombre_completo FROM trabajadores WHERE rol = 'tecnico' ORDER BY nombre_completo")
+    cur.execute("SELECT id, nombre_completo, cedula, telefono FROM trabajadores WHERE rol = 'tecnico' ORDER BY nombre_completo")
     tecnicos = cur.fetchall()
-    cur.execute("SELECT id, nombre_completo FROM usuarios_cor ORDER BY nombre_completo")
-    usuarios_cor = cur.fetchall()
     cur.close()
+
     return render_template('editar_ticket.html', ticket=ticket, nodos=nodos, motivos=motivos,
-                           tipos_falla=tipos_falla, estados=estados, tecnicos=tecnicos, usuarios_cor=usuarios_cor)
+                           tipos_falla=tipos_falla, estados=estados, tecnicos=tecnicos,
+                           tecnicos_asignados=tecnicos_asignados)
 
 # ---------- API TICKET DETALLE ----------
 @app.route('/api/ticket/<int:ticket_id>')
@@ -1590,6 +1628,69 @@ def admin_panel():
     cur.close()
     return render_template('admin_panel.html', total_tecnicos=total_tecnicos, total_clientes=total_clientes, total_tickets=total_tickets)
 
+@app.route('/admin/control_tecnicos')
+@login_required
+def control_tecnicos():
+    if current_user.rol not in ('admin', 'cor'):
+        flash('Acceso denegado', 'danger')
+        return redirect(url_for('dashboard'))
+
+    mes_str = request.args.get('mes', datetime.now().strftime('%Y-%m'))
+    try:
+        anio, mes = map(int, mes_str.split('-'))
+    except:
+        anio, mes = datetime.now().year, datetime.now().month
+
+    conn = get_db()
+    cur = conn.cursor()
+
+    # Obtener todos los técnicos
+    cur.execute("SELECT id, nombre_completo, cedula, telefono FROM trabajadores WHERE rol='tecnico' ORDER BY nombre_completo")
+    tecnicos = cur.fetchall()
+
+    # Obtener los meses que tienen tickets (para el selector)
+    cur.execute("""
+        SELECT DISTINCT DATE_FORMAT(t.fecha, '%Y-%m') AS mes
+        FROM tickets t
+        ORDER BY mes DESC
+    """)
+    meses_con_datos = [row['mes'] for row in cur.fetchall()]
+    # Asegurar que el mes actual esté incluido
+    mes_actual_str = datetime.now().strftime('%Y-%m')
+    if mes_actual_str not in meses_con_datos:
+        meses_con_datos.insert(0, mes_actual_str)
+
+    resumen = []
+    for t in tecnicos:
+        cur.execute("""
+            SELECT DAY(t.fecha) AS dia, COUNT(DISTINCT tt.ticket_id) AS total
+            FROM ticket_tecnicos tt
+            JOIN tickets t ON tt.ticket_id = t.id
+            WHERE tt.tecnico_id = %s
+              AND YEAR(t.fecha) = %s
+              AND MONTH(t.fecha) = %s
+            GROUP BY DAY(t.fecha)
+            ORDER BY dia
+        """, (t['id'], anio, mes))
+        dias = cur.fetchall()
+        conteo_diario = {int(d['dia']): d['total'] for d in dias}
+        total_mes = sum(conteo_diario.values())
+        resumen.append({
+            'tecnico': t,
+            'conteo_diario': conteo_diario,
+            'total_mes': total_mes,
+            'dias_del_mes': calendar.monthrange(anio, mes)[1]
+        })
+
+    cur.close()
+
+    return render_template('control_tecnicos.html',
+                           resumen=resumen,
+                           meses_disponibles=meses_con_datos,
+                           mes_actual=mes_str,
+                           anio=anio,
+                           mes=mes)
+    
 @app.route('/admin/tecnicos', methods=['GET', 'POST'])
 @login_required
 def admin_tecnicos():
