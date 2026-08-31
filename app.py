@@ -1049,27 +1049,42 @@ def api_agregar_cliente_ajax():
 
     resultado = guardar_cliente(datos)
 
-    if resultado == 'inserted' or resultado == 'updated':
-        # Obtener el id del cliente recién creado/actualizado
+    if resultado in ('inserted', 'updated'):
+        # Obtener el id del cliente recién guardado
         conn = get_db()
         cur = conn.cursor()
-        cur.execute("SELECT id, nombre_apellido, n_documento, telefono, nodo FROM clientes WHERE n_documento = %s AND nombre_apellido = %s LIMIT 1",
-                    (datos['n_documento'], datos['nombre_apellido']))
+        cur.execute("""
+            SELECT id, nombre_apellido, n_documento, telefono, nodo
+            FROM clientes
+            WHERE n_documento = %s AND nombre_apellido = %s
+            LIMIT 1
+        """, (datos['n_documento'], datos['nombre_apellido']))
         cliente = cur.fetchone()
         cur.close()
+
         if cliente:
-            return jsonify({'success': True, 'cliente': {
-                'id': cliente['id'],
-                'nombre_apellido': cliente['nombre_apellido'],
-                'n_documento': cliente['n_documento'],
-                'telefono': cliente['telefono'],
-                'nodo': cliente['nodo']
-            }})
+            return jsonify({
+                'success': True,
+                'cliente': {
+                    'id': cliente['id'],
+                    'nombre_apellido': cliente['nombre_apellido'],
+                    'n_documento': cliente['n_documento'],
+                    'telefono': cliente['telefono'],
+                    'nodo': cliente['nodo']
+                }
+            })
         else:
-            return jsonify({'success': True, 'cliente': {'id': None, 'nombre_apellido': datos['nombre_apellido']}})
+            # Si no lo encontramos, devolvemos datos básicos
+            return jsonify({
+                'success': True,
+                'cliente': {
+                    'id': None,
+                    'nombre_apellido': datos['nombre_apellido']
+                }
+            })
     else:
         return jsonify({'error': 'No se pudo guardar el cliente'}), 500
-
+    
 @app.route('/cliente/<int:cliente_id>/editar', methods=['GET', 'POST'])
 @login_required
 def editar_cliente(cliente_id):
