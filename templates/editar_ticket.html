@@ -8,6 +8,10 @@
     <div class="card-body">
         <form method="POST" action="/ticket/{{ ticket.id }}/editar" class="row g-3">
             <div class="col-md-6">
+                <label class="form-label">Fecha *</label>
+                <input type="date" name="fecha" class="form-control" value="{{ ticket.fecha.strftime('%Y-%m-%d') if ticket.fecha else '' }}" required>
+            </div>
+            <div class="col-md-6">
                 <label class="form-label">Nodo</label>
                 <select name="nodo" class="form-select">
                     <option value="">-- Seleccione --</option>
@@ -41,6 +45,27 @@
                     <option value="Resuelto" {% if ticket.status == 'Resuelto' %}selected{% endif %}>Resuelto</option>
                 </select>
             </div>
+
+            <!-- CAMPO RESPONSABLE CON DATALIST DE USUARIOS COR -->
+            <div class="col-md-6">
+                <label class="form-label">Responsable</label>
+                {% if responsable_editable %}
+                    <input type="text" class="form-control" id="responsable" name="responsable"
+                           list="listaCor" value="{{ ticket.responsable or '' }}"
+                           placeholder="Asignar responsable (nombre o usuario)">
+                    <datalist id="listaCor">
+                        {% for usuario in usuarios_cor %}
+                            <option value="{{ usuario }}">
+                        {% endfor %}
+                    </datalist>
+                    <small class="text-muted">Puedes asignar un responsable porque actualmente no tiene o tiene una raya (—).</small>
+                {% else %}
+                    <input type="text" class="form-control" id="responsable" name="responsable"
+                           value="{{ ticket.responsable or '' }}" readonly>
+                    <small class="text-muted">Este ticket ya tiene un responsable asignado y no se puede modificar.</small>
+                {% endif %}
+            </div>
+
             <div class="col-md-6">
                 <label class="form-label">Técnicos Asignados</label>
                 <select name="tecnicos_ids" class="form-select" multiple size="4">

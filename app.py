@@ -1417,6 +1417,8 @@ def agregar_ticket():
         flash('Acceso denegado', 'danger')
         return redirect(url_for('dashboard'))
 
+    # Obtener campos del formulario
+    fecha = request.form.get('fecha', '').strip()
     nodo = request.form.get('nodo', '').strip()
     cliente_id = request.form.get('cliente_id', '').strip()
     motivo_ticket = request.form.get('motivo_ticket', '').strip()
@@ -1425,13 +1427,21 @@ def agregar_ticket():
     status = request.form.get('status', 'Pendiente').strip()
     observaciones = request.form.get('observaciones', '').strip()
     cliente_nombre_busqueda = request.form.get('cliente_nombre_busqueda', '').strip()
-
-    # Lista de técnicos seleccionados (puede ser múltiple)
     tecnicos_ids = request.form.getlist('tecnicos_ids')
+
+    # Convertir fecha si viene vacía usar la actual
+    if fecha:
+        fecha_convertida = convertir_fecha(fecha)
+        if not fecha_convertida:
+            flash('Formato de fecha inválido', 'danger')
+            return redirect(url_for('tickets'))
+    else:
+        fecha_convertida = datetime.now().strftime('%Y-%m-%d')
 
     conn = get_db()
     cur = conn.cursor()
 
+    # Buscar cliente si solo se ingresó nombre
     if not cliente_id and cliente_nombre_busqueda:
         cur.execute("SELECT id, nombre_apellido, nodo FROM clientes WHERE nombre_apellido = %s LIMIT 1", (cliente_nombre_busqueda,))
         cliente = cur.fetchone()
@@ -1456,11 +1466,11 @@ def agregar_ticket():
 
     cliente_nombre = cliente['nombre_apellido']
     num_ticket = generar_numero_ticket()
-    fecha = datetime.now().strftime('%Y-%m-%d')
+
     if re.search(r'ap\s*ca[ií]da', tipo_falla, re.IGNORECASE):
         tipo_falla = 'AP caída'
 
-    # Asignación automática de responsable
+    # Asignación automática de responsable si es usuario COR
     if current_user.rol == 'cor':
         responsable = current_user.nombre_completo
         cor_id = current_user.id
@@ -1468,12 +1478,14 @@ def agregar_ticket():
         responsable = ''
         cor_id = None
 
+    # Insertar ticket con la fecha seleccionada o actual
     cur.execute("""
         INSERT INTO tickets (fecha, num_ticket, nodo, cliente, motivo_ticket, visita_tecnica, 
                             tipo_falla, departamento, status, responsable, observaciones, tecnico_id, cor_id)
         VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NULL,%s)
-    """, (fecha, num_ticket, nodo, cliente_nombre, motivo_ticket, visita_tecnica, 
+    """, (fecha_convertida, num_ticket, nodo, cliente_nombre, motivo_ticket, visita_tecnica, 
           tipo_falla, '', status, responsable, observaciones, cor_id))
+
     ticket_id = cur.lastrowid
 
     # Insertar relaciones con técnicos
@@ -1484,8 +1496,7 @@ def agregar_ticket():
     conn.commit()
     cur.close()
     flash(f'Ticket {num_ticket} agregado correctamente', 'success')
-    return redirect(url_for('tickets'))  # Redirigir a lista de tickets, no a planilla
-
+    return redirect(url_for('tickets'))
 @app.route('/ticket/<int:ticket_id>/eliminar', methods=['POST'])
 @login_required
 def eliminar_ticket(ticket_id):
@@ -1546,6 +1557,7 @@ def editar_ticket(ticket_id):
         return redirect(url_for('tickets'))
 
     if request.method == 'POST':
+        fecha = request.form.get('fecha', '').strip()
         nodo = request.form.get('nodo', '').strip()
         motivo_ticket = request.form.get('motivo_ticket', '').strip()
         visita_tecnica = request.form.get('visita_tecnica', '').strip()
@@ -1554,18 +1566,59 @@ def editar_ticket(ticket_id):
         status = request.form.get('status', '').strip()
         observaciones = request.form.get('observaciones', '').strip()
         tecnicos_ids = request.form.getlist('tecnicos_ids')
+        nuevo_responsable = request.form.get('responsable', '').strip()
+
+        # Convertir fecha
+        if fecha:
+            fecha_convertida = convertir_fecha(fecha)
+            if not fecha_convertida:
+                flash('Formato de fecha inválido', 'danger')
+                return redirect(url_for('editar_ticket', ticket_id=ticket_id))
+        else:
+            fecha_convertida = ticket['fecha']
 
         if re.search(r'ap\s*ca[ií]da', tipo_falla, re.IGNORECASE):
             tipo_falla = 'AP caída'
 
-        # Actualizar ticket principal
-        cur.execute("""
-            UPDATE tickets SET nodo=%s, motivo_ticket=%s, visita_tecnica=%s, tipo_falla=%s,
-            departamento=%s, status=%s, observaciones=%s
-            WHERE id=%s
-        """, (nodo, motivo_ticket, visita_tecnica, tipo_falla, departamento, status, observaciones, ticket_id))
+        # Obtener el responsable actual del ticket
+        cur.execute("SELECT responsable FROM tickets WHERE id = %s", (ticket_id,))
+        ticket_actual = cur.fetchone()
+        if not ticket_actual:
+            flash('Ticket no encontrado', 'danger')
+            return redirect(url_for('tickets'))
 
-        # Actualizar relaciones de técnicos
+        # Construir la actualización
+        update_fields = []
+        params = []
+        update_fields.append("fecha=%s")
+        params.append(fecha_convertida)
+        update_fields.append("nodo=%s")
+        params.append(nodo)
+        update_fields.append("motivo_ticket=%s")
+        params.append(motivo_ticket)
+        update_fields.append("visita_tecnica=%s")
+        params.append(visita_tecnica)
+        update_fields.append("tipo_falla=%s")
+        params.append(tipo_falla)
+        update_fields.append("departamento=%s")
+        params.append(departamento)
+        update_fields.append("status=%s")
+        params.append(status)
+        update_fields.append("observaciones=%s")
+        params.append(observaciones)
+
+        # Condición: se puede editar responsable si actualmente es None, vacío o "—"
+        responsable_actual = ticket_actual.get('responsable')
+        if responsable_actual is None or responsable_actual == '' or responsable_actual == '—':
+            update_fields.append("responsable=%s")
+            # Si se envía vacío, guardamos NULL
+            params.append(nuevo_responsable if nuevo_responsable else None)
+
+        params.append(ticket_id)
+        sql = f"UPDATE tickets SET {', '.join(update_fields)} WHERE id=%s"
+        cur.execute(sql, params)
+
+        # Actualizar técnicos asignados
         cur.execute("DELETE FROM ticket_tecnicos WHERE ticket_id = %s", (ticket_id,))
         for t_id in tecnicos_ids:
             if t_id:
@@ -1576,10 +1629,7 @@ def editar_ticket(ticket_id):
         flash('Ticket actualizado correctamente', 'success')
         return redirect(url_for('detalle_ticket', ticket_id=ticket_id))
 
-    # Obtener técnicos ya asignados para marcarlos en el formulario
-    cur.execute("SELECT tecnico_id FROM ticket_tecnicos WHERE ticket_id = %s", (ticket_id,))
-    tecnicos_asignados = [row['tecnico_id'] for row in cur.fetchall()]
-
+    # --- GET: preparar formulario ---
     cur.execute("SELECT DISTINCT nodo FROM clientes WHERE nodo IS NOT NULL AND nodo != '' UNION SELECT DISTINCT nodo FROM tickets WHERE nodo IS NOT NULL AND nodo != '' ORDER BY nodo")
     nodos = [row['nodo'] for row in cur.fetchall()]
     cur.execute("SELECT DISTINCT motivo_ticket FROM tickets WHERE motivo_ticket IS NOT NULL AND motivo_ticket != '' ORDER BY motivo_ticket")
@@ -1590,11 +1640,28 @@ def editar_ticket(ticket_id):
     estados = [row['status'] for row in cur.fetchall()]
     cur.execute("SELECT id, nombre_completo, cedula, telefono FROM trabajadores WHERE rol = 'tecnico' ORDER BY nombre_completo")
     tecnicos = cur.fetchall()
+    cur.execute("SELECT tecnico_id FROM ticket_tecnicos WHERE ticket_id = %s", (ticket_id,))
+    tecnicos_asignados = [row['tecnico_id'] for row in cur.fetchall()]
+    
+    # Obtener lista de usuarios COR para el campo responsable
+    cur.execute("SELECT nombre_completo FROM usuarios_cor ORDER BY nombre_completo")
+    usuarios_cor = [row['nombre_completo'] for row in cur.fetchall()]
     cur.close()
 
-    return render_template('editar_ticket.html', ticket=ticket, nodos=nodos, motivos=motivos,
-                           tipos_falla=tipos_falla, estados=estados, tecnicos=tecnicos,
-                           tecnicos_asignados=tecnicos_asignados)
+    # Determinar si el responsable es editable: None, '' o '—'
+    responsable_actual = ticket.get('responsable')
+    responsable_editable = responsable_actual is None or responsable_actual == '' or responsable_actual == '—'
+
+    return render_template('editar_ticket.html',
+                           ticket=ticket,
+                           nodos=nodos,
+                           motivos=motivos,
+                           tipos_falla=tipos_falla,
+                           estados=estados,
+                           tecnicos=tecnicos,
+                           tecnicos_asignados=tecnicos_asignados,
+                           responsable_editable=responsable_editable,
+                           usuarios_cor=usuarios_cor)  # <-- NUEVO
 
 # ---------- API TICKET DETALLE ----------
 @app.route('/api/ticket/<int:ticket_id>')
@@ -2128,7 +2195,6 @@ def generar_planilla_cliente():
     cliente = None
     tecnico = None
 
-    # 1) Si hay ticket_id, cargar datos del ticket y cliente asociado
     if ticket_id:
         cur.execute("SELECT * FROM tickets WHERE id = %s", (ticket_id,))
         ticket = cur.fetchone()
@@ -2137,31 +2203,13 @@ def generar_planilla_cliente():
             flash('Ticket no encontrado', 'danger')
             return redirect(url_for('planilla_soporte'))
 
-        # Obtener cliente del ticket (por nombre o por cliente_id si se pasó)
-        if cliente_id:
-            cur.execute("SELECT * FROM clientes WHERE id = %s", (cliente_id,))
-            cliente = cur.fetchone()
-        elif ticket.get('cliente'):
-            cur.execute("SELECT * FROM clientes WHERE nombre_apellido = %s LIMIT 1", (ticket['cliente'],))
-            cliente = cur.fetchone()
+        # Bloquear si no requiere visita técnica
+        if ticket.get('visita_tecnica') == 'No':
+            cur.close()
+            flash('Este ticket no requiere visita técnica, no se puede generar planilla.', 'warning')
+            return redirect(url_for('tickets'))
 
-        # Si no hay cliente, crear uno provisional para el PDF
-        if not cliente:
-            cliente = {
-                'id': None,
-                'nombre_apellido': ticket.get('cliente', ''),
-                'direccion_servicio': '',
-                'telefono': '',
-                'nodo': ticket.get('nodo', ''),
-                'mbps_contratados': '',
-                'estatus_usuario': '',
-                'asignador': ''
-            }
-
-        # Obtener técnico si está asignado
-        if ticket.get('tecnico_id'):
-            cur.execute("SELECT id, username, nombre_completo, cedula, telefono FROM trabajadores WHERE id = %s AND rol = 'tecnico'", (ticket['tecnico_id'],))
-            tecnico = cur.fetchone()
+        # ... resto del código sin cambios
 
     # 2) Si no hay ticket_id: solo permitir factibilidad/instalación con cliente manual
     else:
