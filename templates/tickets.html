@@ -54,6 +54,7 @@
                     <select name="status" class="form-select">
                         <option value="Pendiente" selected>Pendiente</option>
                         <option value="Resuelto">Resuelto</option>
+                        <option value="Cerrado">Cerrado</option>
                     </select>
                 </div>
                 <div class="col-md-3">
@@ -147,7 +148,14 @@
                         <td>{{ ticket.motivo_ticket or '—' }}</td>
                         <td>{{ ticket.tipo_falla or '—' }}</td>
                         <td>
-                            <span class="badge {% if ticket.status == 'Pendiente' %}badge-danger{% elif ticket.status == 'Resuelto' %}badge-success{% else %}badge-secondary{% endif %}">
+                            {# AQUI ESTA EL CAMBIO DE COLORES DE STATUS #}
+                            {% set estado = (ticket.status or '')|lower %}
+                            <span class="badge 
+                                {% if estado == 'pendiente' %}bg-warning text-dark
+                                {% elif estado == 'resuelto' %}bg-success text-white
+                                {% elif estado == 'cerrado' %}bg-dark text-white
+                                {% elif 'pendiente' in estado %}bg-danger text-white
+                                {% else %}bg-secondary text-white{% endif %}">
                                 {{ ticket.status or '—' }}
                             </span>
                         </td>

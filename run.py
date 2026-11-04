@@ -79,10 +79,19 @@ if __name__ == '__main__':
             print(f"   👉 http://{ip}:{port}")
     else:
         print(f"\n📡 Para acceder desde otra PC en tu misma red: http://TU_IP_LOCAL:{port}")
-        
-    print("\n🔄 Modo DEBUG activado: los cambios se recargan automáticamente al guardar.")
-    print("🛑 Presiona CTRL+C para detener el servidor.")
-    print("=" * 60 + "\n")
     
-    # Modo debug: recarga automática al guardar cambios
-    app.run(debug=True, host='0.0.0.0', port=port)
+    # Leemos si el entorno pide modo debug (solo para pruebas locales)
+    debug_mode = os.environ.get('FLASK_DEBUG', '0') == '1'
+    
+    if debug_mode:
+        print("\n🔄 Modo DEBUG activado: los cambios se recargan automáticamente al guardar.")
+        print("🛑 Presiona CTRL+C para detener el servidor.")
+        print("=" * 60 + "\n")
+        app.run(debug=True, host='0.0.0.0', port=port)
+    else:
+        # MODO PRODUCCIÓN (Seguro y rápido con Waitress)
+        from waitress import serve
+        print("\n🚀 Modo PRODUCCIÓN activado (Servidor Waitress).")
+        print("🛑 Presiona CTRL+C para detener el servidor.")
+        print("=" * 60 + "\n")
+        serve(app, host='0.0.0.0', port=port)
